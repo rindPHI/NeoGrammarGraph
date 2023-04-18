@@ -21,16 +21,19 @@ jobs:
         python-version: "3.10"
     - name: Install dependencies
       run: |
-        sudo add-apt-repository "deb [ arch=amd64 ] https://downloads.skewed.de/apt jammy main"
         sudo apt-key adv --keyserver keys.openpgp.org --recv-key 612DEFB798507F25
+        sudo add-apt-repository -y "deb [ arch=amd64 ] https://downloads.skewed.de/apt jammy main"
         sudo apt-get update
-        sudo apt-get install python3-graph-tool
+        sudo apt-get install -y python3-graph-tool
         pip install --upgrade pip
         pip install -e .[dev,test]
+       
+        which python3 
+        find /usr/lib -d -name "graph_tool"
     - name: Test with pytest
       run: |
-        python3.10 -m pytest --html=report.html --self-contained-html --cov-report xml:coverage.xml --cov-report term --cov-config=.coveragerc --cov=gg tests/
-        python3.10 -m coverage lcov
+        python3 -m pytest --html=report.html --self-contained-html --cov-report xml:coverage.xml --cov-report term --cov-config=.coveragerc --cov=gg tests/
+        python3 -m coverage lcov
     - uses: actions/upload-artifact@v3
       with:
         name: Test Report
