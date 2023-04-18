@@ -30,7 +30,7 @@ jobs:
         pip install -e .[dev,test]
     - name: Test with pytest
       run: |
-        python3 -m pytest --html=report.html --self-contained-html --cov-report xml:coverage.xml --cov-report term --cov-config=.coveragerc --cov=gg tests/
+        python3 -m pytest --html=report.html --self-contained-html --cov-report xml:coverage.xml --cov-report term --cov-config=.coveragerc --cov=neo_grammar_graph tests/
         python3 -m coverage lcov
     - uses: actions/upload-artifact@v3
       with:
