@@ -2,6 +2,12 @@
 
 ## [unreleased]
 
+## [0.0.3] - 2023-04-19
+
+### Added
+
+- Access to the children of a grammar symbol in the graph.
+
 ## [0.0.2] - 2023-04-19
 
 ### Added

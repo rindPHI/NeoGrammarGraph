@@ -183,6 +183,51 @@ class NeoGrammarGraph:
 
         return self.graph.vp.label[vertex]
 
+    def children(self, symbol: str) -> Optional[List[str]]:
+        """
+        Returns the immediate children of a grammar symbol in the graph. If the given
+        symbol does not exist in the graph, :code:`None` is returned.
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> graph.children("<stmt>")
+        ['<stmt>-choice-1', '<stmt>-choice-2']
+
+        >>> graph.children("<stmt>-choice-1")
+        ['<assgn>', ' ; ', '<stmt>']
+
+        >>> graph.children(" ; ")
+        []
+
+        >>> graph.children(" nope ") is None
+        True
+
+        :param symbol: The parent symbol.
+        :return: The children of :code:`symbol` in the graph.
+        """
+
+        vertex = self.vertex(symbol)
+        if vertex is None:
+            return None
+
+        return [
+            self.symbol(child_vertex)
+            for child_vertex in vertex.out_neighbors()
+        ]
+
     def reachable(self, from_nonterminal: str, to_nonterminal: str) -> bool:
         """
         Checks whether the nonterminal symbol :code:`to_nonterminal` is reachable
@@ -463,7 +508,6 @@ class NeoGrammarGraph:
 
         if source_vertex is None or target_vertex is None:
             return None
-
 
         # Compute the shortest path starting from each child choice node.
         # Since we start at choice nodes with index 1 in the results,
