@@ -17,7 +17,7 @@ implemented features should work significantly more efficiently thanks to graph-
 ## Supported Features
 
 * Reachability of grammar symbols.
-* Computing shortest paths between grammar symbols.
+* Computing the shortest path or all paths between two grammar symbols.
 * Export to GraphViz DOT files.
 
 ## Planned Features

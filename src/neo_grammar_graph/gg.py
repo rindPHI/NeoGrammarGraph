@@ -17,11 +17,12 @@
 # along with NeoGrammarGraph.  If not, see <http://www.gnu.org/licenses/>.
 
 import os.path
-from typing import Dict, List, Callable, Optional
+from typing import Dict, List, Callable, Optional, Tuple
 
 from graph_tool import Graph, Vertex, Edge
 from graph_tool.search import bfs_search, BFSVisitor, StopSearch
-from graph_tool.topology import transitive_closure
+from graph_tool.topology import transitive_closure, all_paths
+from orderedset import OrderedSet
 
 from neo_grammar_graph.helpers import split_expansion
 from neo_grammar_graph.type_defs import Grammar
@@ -223,10 +224,7 @@ class NeoGrammarGraph:
         if vertex is None:
             return None
 
-        return [
-            self.symbol(child_vertex)
-            for child_vertex in vertex.out_neighbors()
-        ]
+        return [self.symbol(child_vertex) for child_vertex in vertex.out_neighbors()]
 
     def reachable(self, from_nonterminal: str, to_nonterminal: str) -> bool:
         """
@@ -546,6 +544,78 @@ class NeoGrammarGraph:
         )
 
         return result
+
+    def paths_between(
+        self,
+        start_symbol: str,
+        target_symbol: str,
+        node_filter: Callable[[int, str], bool] = lambda idx, _: idx % 2 == 0,
+    ) -> Optional[OrderedSet[Tuple[str, ...]]]:
+        """
+        Returns a list of all paths between the given grammar symbols.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        There are two paths from :code:`<stmt>` to :code:`digit` if we omit the
+        filtering of intermediate choice nodes:
+
+        >>> str(graph.paths_between("<stmt>", "<digit>", lambda idx, sym: True))
+        "{('<stmt>', '<stmt>-choice-1', '<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>'), ('<stmt>', '<stmt>-choice-2', '<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>')}"
+
+        With the default node filter, those paths collapse to a single one:
+
+        >>> str(graph.paths_between("<stmt>", "<digit>"))
+        "{('<stmt>', '<assgn>', '<rhs>', '<digit>')}"
+
+        There is no path from :code:`<digit>` to itself:
+
+        >>> str(graph.paths_between("<digit>", "<digit>"))
+        '{}'
+
+        If a symbol does not exist, we obtain :code:`None`:
+
+        >>> graph.paths_between("<some-digit>", "<digit>") is None
+        True
+
+        :param start_symbol: The start symbol of the desired paths.
+        :param target_symbol: The target symbol of the desired paths.
+        :param node_filter: A function for filtering out elements of the returned paths,
+            if any. The function must accept two arguments, the first will be an
+            integer, the position of the path element, and the second a string, the path
+            element itself. Indices/positions start at 0 for the first element.
+        :return: A list of all paths between the given grammar symbols or :code:`None`
+            if start or target symbols do not exist in the grammar graph.
+        """
+
+        start_vertex = self.vertex(start_symbol)
+        target_vertex = self.vertex(target_symbol)
+
+        if start_vertex is None or target_vertex is None:
+            return None
+
+        return OrderedSet([
+            tuple([
+                self.symbol(self.graph.vertex(vid))
+                for idx, vid in enumerate(path)
+                if node_filter(idx, self.symbol(self.graph.vertex(vid)))
+            ])
+            for path in all_paths(self.graph, start_vertex, target_vertex)
+        ])
 
     def save_to_dot(self, file_name: str) -> None:
         """
