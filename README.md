@@ -1,5 +1,12 @@
 # NeoGrammarGraph
 
+[![Python](https://img.shields.io/pypi/pyversions/neo-grammar-graph.svg)](https://pypi.python.org/pypi/neo-grammar-graph/)
+[![Version](https://img.shields.io/pypi/v/neo-grammar-graph)](https://pypi.python.org/pypi/neo-grammar-graph/)
+[![BuildStatus](https://img.shields.io/github/actions/workflow/status/rindPHI/NeoGrammarGraph/test-gg.yml?branch=main)](https://img.shields.io/github/actions/workflow/status/rindPHI/NeoGrammarGraph/test-gg.yml?branch=main)
+[![Coverage Status](https://coveralls.io/repos/github/rindPHI/NeoGrammarGraph/badge.svg?branch=main)](https://coveralls.io/github/rindPHI/NeoGrammarGraph?branch=main)
+[![Dependencies](https://img.shields.io/librariesio/release/github/rindphi/NeoGrammarGraph)](https://libraries.io/github/rindPHI/NeoGrammarGraph)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 Creating graphs from context-free grammars for fun and profit.
 
 This project is a re-implementation of [GrammarGraph](https://github.com/rindPHI/GrammarGraph/)
@@ -9,14 +16,14 @@ implemented features should work significantly more efficiently thanks to graph-
 
 ## Supported Features
 
-* Reachability
+* Reachability of grammar symbols.
+* Computing shortest paths between grammar symbols.
 * Export to GraphViz DOT files.
 
 ## Planned Features
 
 * Creating sub graphs
 * Filter abstraction
-* Dijkstra's algorithm for shortest paths between nodes
 * Checking whether a (sub) graph represents a tree
 * Computing k-paths (paths of exactly length k) in grammars and derivation trees, and a 
   k-path coverage measure ([see this paper](https://ieeexplore.ieee.org/document/8952419)) of 
@@ -49,6 +56,14 @@ some paths depending on the Python/graph-tool versions on your system):
 ln -s \
     /usr/local/Cellar/graph-tool/2.51/lib/python3.11/site-packages/graph_tool \
     venv/lib/python3.10/site-packages
+```
+
+For the GitHub workflow, the following line was required:
+
+```shell
+sudo ln -s \
+    /usr/lib/python3/dist-packages/graph_tool \
+    /opt/hostedtoolcache/Python/3.10.11/x64/lib/python3.10/site-packages
 ```
 
 Author: [Dominic Steinhöfel](https://www.dominic-steinhoefel.de).
