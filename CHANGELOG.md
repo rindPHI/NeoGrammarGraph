@@ -2,6 +2,14 @@
 
 ## [unreleased]
 
+## [0.0.5] - 2023-04-21
+
+### Added
+
+- k-path computation.
+- Subgraph extraction.
+- Filtering nodes of a graph.
+
 ## [0.0.4] - 2023-04-19
 
 ### Added

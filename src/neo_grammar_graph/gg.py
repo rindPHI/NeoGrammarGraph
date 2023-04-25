@@ -15,37 +15,82 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with NeoGrammarGraph.  If not, see <http://www.gnu.org/licenses/>.
-
 import os.path
-from typing import Dict, List, Callable, Optional, Tuple
+from functools import lru_cache
+from typing import Dict, List, Callable, Optional, Tuple, Any
 
-from graph_tool import Graph, Vertex, Edge
+from graph_tool import Graph, Vertex, Edge, GraphView
 from graph_tool.search import bfs_search, BFSVisitor, StopSearch
 from graph_tool.topology import transitive_closure, all_paths
 from orderedset import OrderedSet
 
-from neo_grammar_graph.helpers import split_expansion
-from neo_grammar_graph.type_defs import Grammar
+from neo_grammar_graph.helpers import split_expansion, grammar_terminals, is_nonterminal
+from neo_grammar_graph.type_defs import Grammar, ParseTree
 
 
 class NeoGrammarGraph:
-    def __init__(self, grammar: Grammar):
+    def __init__(
+        self,
+        grammar: Grammar,
+        _graph: Optional[Graph] = None,
+        _closure: Optional[Graph] = None,
+        _choice_nodes: Optional[OrderedSet[str]] = None,
+        _nonterminal_vertex_map: Optional[Dict[str, Vertex]] = None,
+    ):
         """
         Constructs a :class:`~grammar_graph.NeoGrammarGraph` from the given
         :class:`~grammar_graph.type_defs.Grammar`.
 
         :param grammar: The grammar to construct the
             :class:`~grammar_graph.NeoGrammarGraph` object from.
+        :param _graph: An optional graph object. For internal purposes.
+        :param _closure: An optional transitive closure of the passed graph object.
+            For internal purposes.
+        :param _choice_nodes: The choice nodes in the graph object. For internal
+            purposes.
+        :param _nonterminal_vertex_map: An optional mapping from grammar symbols to
+            the corresponding vertex objects. For internal purposes.
         """
-        self.grammar = grammar
-        self.graph = Graph()
-        self.closure = None
 
-        edges = []
+        # Either none or all of the optional arguments (but :code:`_closure`) should
+        # be provided.
+        assert (
+            _graph is None
+            and _closure is None
+            and _choice_nodes is None
+            and _nonterminal_vertex_map is None
+            or _graph is not None
+            and _choice_nodes is not None
+            and _nonterminal_vertex_map is not None
+        )
 
+        self.grammar: Grammar = grammar
+        self.graph: Graph = _graph or Graph()
+        self.closure: Optional[Graph] = _closure
+        self.choice_nodes: OrderedSet[str] = _choice_nodes or OrderedSet()
+        self.nonterminal_vertex_map: Dict[str, Vertex] = _nonterminal_vertex_map or {}
+
+        # Cache
+        self.__hash: Optional[int] = None
+
+        if _graph is None:
+            self.__initialize_graph()
+
+    def __initialize_graph(self):
+        """
+        Initializes the graph: Adds vertices and edges according to the grammar,
+        registers choice nodes, sets the vertex labels to the corresponding grammar
+        symbols, and populates the map from grammar symbols to vertices.
+
+        :return: Nothing. Writes to :code:`self.choice_nodes`, :code:`self.graph`,
+            and resets :code:`self.nonterminal_vertex_map`.
+        """
+
+        edges: List[Tuple[str, str, int]] = []
         for nonterminal in self.grammar:
             for nr, alternative in enumerate(self.grammar[nonterminal]):
                 choice_node_name = f"{nonterminal}-choice-{nr + 1}"
+                self.choice_nodes.add(choice_node_name)
                 edges.append((nonterminal, choice_node_name, 1))
                 edges.extend(
                     [
@@ -54,13 +99,112 @@ class NeoGrammarGraph:
                     ]
                 )
 
-        self.edge_weights = self.graph.new_ep("double")
+        edge_weights = self.graph.new_ep("double")
         self.graph.vp.label = self.graph.add_edge_list(
-            edges, hashed=True, eprops=[self.edge_weights]
+            edges, hashed=True, eprops=[edge_weights]
         )
-        self.nonterminal_vertex_map: Dict[str, Vertex] = {
+        self.nonterminal_vertex_map = {
             self.graph.vp.label[v]: v for v in self.graph.vertices()
         }
+
+    def __eq__(self, other: Any) -> bool:
+        """
+        Returns True if the other object is a NeoGrammarGraph object with the same
+        grammar.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        A graph equals itself.
+
+        >>> graph == graph
+        True
+
+        Two different graph objects are equal if they have the same grammar.
+
+        >>> NeoGrammarGraph(grammar) == NeoGrammarGraph(grammar)
+        True
+
+        But it is different from a proper subgraph of itself.
+
+        >>> NeoGrammarGraph(grammar) == NeoGrammarGraph(grammar).subgraph("<assgn>")
+        False
+
+        :param other: The object to compare.
+        :return: True if the other object is a NeoGrammarGraph object with the same
+            grammar.
+        """
+
+        return isinstance(other, NeoGrammarGraph) and self.grammar == other.grammar
+
+    def __hash__(self):
+        """
+        Computes the hash of this grammar graph object based on the grammar. The hash
+        is cached.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        The hashes of graph objects with the same grammar are equal.
+
+        >>> hash(NeoGrammarGraph(grammar)) == hash(NeoGrammarGraph(grammar))
+        True
+
+        The hash of a sub graph is (in this example!) different.
+
+        >>> hash(NeoGrammarGraph(grammar)) == \
+                hash(NeoGrammarGraph(grammar).subgraph("<assgn>"))
+        False
+
+        The sub graph for :code:`<start>` is the same as the original graph, so the
+        hashes are also identical.
+
+        >>> hash(NeoGrammarGraph(grammar)) == \
+                hash(NeoGrammarGraph(grammar).subgraph("<start>"))
+        True
+
+        :return: A has value for this graph.
+        """
+
+        if self.__hash is None:
+            self.__hash = hash(
+                tuple(
+                    [
+                        (nonterminal, tuple(expansions))
+                        for nonterminal, expansions in self.grammar.items()
+                    ]
+                )
+            )
+
+        return self.__hash
 
     def vertex_idx(self, symbol: str) -> Optional[int]:
         """
@@ -152,6 +296,84 @@ class NeoGrammarGraph:
 
         return self.nonterminal_vertex_map.get(symbol, None)
 
+    def nodes(self) -> List[str]:
+        """
+        Returns a list of all graph nodes, including the artificial choice nodes.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        Including terminal symbols and choice nodes, there are 86 nodes in the graph:
+
+        >>> len(graph.nodes())
+        86
+
+        These are the first ten nodes:
+
+        >>> graph.nodes()[:6]
+        ['<start>', '<start>-choice-1', '<stmt>', '<stmt>-choice-1', '<assgn>', ' ; ']
+
+        :return: All nodes in this grammar graph.
+        """
+
+        return [self.symbol(v) for v in self.graph.vertices()]
+
+    def edges(self) -> List[Tuple[str, str]]:
+        """
+        Returns a list of all edges in this graph.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> print("\\n".join(map(str, graph.edges()[:10])))
+        ('<start>', '<start>-choice-1')
+        ('<start>-choice-1', '<stmt>')
+        ('<stmt>', '<stmt>-choice-1')
+        ('<stmt>', '<stmt>-choice-2')
+        ('<stmt>-choice-1', '<assgn>')
+        ('<stmt>-choice-1', ' ; ')
+        ('<stmt>-choice-1', '<stmt>')
+        ('<assgn>', '<assgn>-choice-1')
+        ('<stmt>-choice-2', '<assgn>')
+        ('<assgn>-choice-1', '<var>')
+
+        :return: All edges in the grammar graph. Contains edges to artificial
+            "choice nodes."
+        """
+
+        return [
+            (self.symbol(edge.source()), self.symbol(edge.target()))
+            for edge in self.graph.edges()
+        ]
+
     def symbol(self, vertex: Vertex) -> str:
         """
         Returns the symbol (terminal or nonterminal symbols from the grammar or choice
@@ -225,6 +447,243 @@ class NeoGrammarGraph:
             return None
 
         return [self.symbol(child_vertex) for child_vertex in vertex.out_neighbors()]
+
+    def subgraph(self, start_nonterminal: str) -> "NeoGrammarGraph":
+        """
+        Computes a sub graph for that part of the grammar starting with
+        :code:`start_nonterminal`. The resulting grammar will still start with
+        "<start>", but this initial nonterminal will be connected to
+        :code:`start_nonterminal`.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        The nonterminals of the sub graph correspond to those reachable from the chosen
+        start nonterminal. In particular, :code:`<stmt>` is missing in the below
+        example:
+
+        >>> subgraph = graph.subgraph("<assgn>")
+        >>> list(subgraph.grammar.keys())
+        ['<start>', '<assgn>', '<rhs>', '<var>', '<digit>']
+
+        The :code:`<start>` nonterminal is connected to :code:`start_nonterminal`:
+
+        >>> [(s, t) for s, t in subgraph.edges() if s == "<start>" or t == "<assgn>"]
+        [('<start>', '<start>-choice-1'), ('<start>-choice-1', '<assgn>')]
+
+        The only edge of a sub graph not contained in the original graph is part of
+        the connection of :code:`<start>` to the :code:`start_nonterminal` (via the
+        corresponding choice node):
+
+        >>> set(subgraph.edges()).difference(set(graph.edges()))
+        {('<start>-choice-1', '<assgn>')}
+
+        Two arbitrary nodes in the subgraph are connected if, and only if, they are
+        connected in the original graph:
+
+        >>> for n_1 in subgraph.nodes():
+        ...     for n_2 in subgraph.nodes():
+        ...         assert (
+        ...             not graph.reachable(n_1, n_2) and
+        ...             not subgraph.reachable(n_1, n_2) or
+        ...             graph.reachable(n_1, n_2) and
+        ...             subgraph.reachable(n_1, n_2))
+
+        The "sub graph" for the nonterminal symbol :code:`<start>` itself is the
+        original graph:
+
+        >>> graph is graph.subgraph("<start>")
+        True
+
+        :param start_nonterminal: The nonterminal symbol determining the sub grammar
+            of the sub graph to be computed.
+        :return: A sub graph for the grammar starting with :code:`start_nonterminal`.
+            The resulting graph/grammar satisfy the convention that the grammar starts
+            with the initial symbol :code:`<start>`, which is connected to
+            :code:`start_nonterminal`.
+        """
+
+        # We always assume the start nonterminal of a grammar to be :code:`<start>`.
+        # If this nonterminal is given, we return the original NeoGrammarGraph object.
+        # Note that we do not copy the object, it will literally be the same one.
+        if start_nonterminal == "<start>":
+            return self
+
+        start_vertex = self.vertex(start_nonterminal)
+        assert start_vertex is not None
+
+        # Create the new grammar using graph reachability
+        new_grammar = {"<start>": [start_nonterminal]} | {
+            nonterminal: list(expansion)
+            for nonterminal, expansion in self.grammar.items()
+            if nonterminal == start_nonterminal
+            or self.reachable(start_nonterminal, nonterminal)
+        }
+
+        # Construct the reachability property used for filtering
+        reachable = self.graph.new_vertex_property("bool")
+
+        for vertex in self.graph.vertices():
+            reachable[vertex] = vertex == start_vertex or self.reachable(
+                start_nonterminal, self.graph.vp.label[vertex]
+            )
+
+        # Create the new graph-tool graph as a filtered version of the original one.
+        new_graph = Graph(g=GraphView(self.graph, vfilt=reachable))
+        # We make the view irreversible. Otherwise, we experience problems with some
+        # functionality, such as DOT export.
+        new_graph.purge_vertices()
+
+        # We update the choice nodes set; all unreachable nodes are removed.
+        new_choice_nodes = OrderedSet(
+            [symbol for symbol in self.choice_nodes if reachable[self.vertex(symbol)]]
+        )
+
+        # We create a new "<start>" vertex with a single choice node pointing to
+        # the chosen `start_nonterminal`. This is required since "<start>" needs to
+        # be the start nonterminal by convention.
+        new_start_vertex = new_graph.add_vertex()
+        new_graph.vp.label[new_start_vertex] = "<start>"
+        new_choice_vertex = new_graph.add_vertex()
+        new_choice_label = "<start>-choice-1"
+        new_graph.vp.label[new_choice_vertex] = new_choice_label
+        new_choice_nodes.add(new_choice_label)
+
+        # Since IDs might have changed, we update the nonterminal vertex map.
+        new_nonterminal_vertex_map = {
+            new_graph.vp.label[v]: v for v in new_graph.vertices()
+        }
+
+        # With the new vertex information, we add the edges connecting the new
+        # initial nonterminal and the chosen start node.
+        new_graph.add_edge(new_start_vertex, new_choice_vertex)
+        new_graph.add_edge(
+            new_choice_vertex, new_nonterminal_vertex_map[start_nonterminal]
+        )
+
+        return NeoGrammarGraph(
+            new_grammar, new_graph, None, new_choice_nodes, new_nonterminal_vertex_map
+        )
+
+    def is_tree(self) -> bool:
+        """
+        Checks whether this graph is a tree, i.e., each node has exactly one parent.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        The assignment language grammar is recursive, so it cannot be a tree.
+
+        >>> graph.is_tree()
+        False
+
+        Though assignments are not recursive, they are no trees: The :code:`<var>` node
+        is reachable from an assignment or a :code:`<rhs>` nonterminal. The subgraph
+        for :code:`<assgn>` is a directed, acyclic graph (DAG).
+
+        >>> graph.subgraph("<assgn>").is_tree()
+        False
+
+        >>> graph.subgraph("<rhs>").is_tree()
+        True
+
+        :return:
+        """
+
+        class TreeVisitor(BFSVisitor):
+            def __init__(self):
+                self.result = True
+
+            def non_tree_edge(self, e):
+                self.result = False
+                raise StopSearch()
+
+        v = TreeVisitor()
+        bfs_search(self.graph, source=self.vertex("<start>"), visitor=v)
+
+        return v.result
+
+    def filter(self, filter_function: Callable[[str], bool]) -> OrderedSet[str]:
+        """
+        Computes the set of graph nodes satisfying the criterion determined by
+        :code:`filter_function`.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        Filtering out all choice nodes and all terminal symbols (nodes without children)
+        yields all grammar nonterminals.
+
+        >>> list(graph.filter(
+        ...     lambda symbol:
+        ...         symbol not in graph.choice_nodes
+        ...         and graph.children(symbol)))
+        ['<start>', '<stmt>', '<assgn>', '<var>', '<rhs>', '<digit>']
+
+        On the other hand, we can also specifically ask for all symbols whose nodes
+        don't have children, i.e., the terminal symbols:
+
+        >>> list(graph.filter(lambda symbol: not graph.children(symbol)))[:14]
+        [' ; ', ' := ', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l']
+
+        :param filter_function: A function taking a grammar symbol (nonterminals,
+            terminals, or choice nodes) and deciding whether it should be filtered out
+            (return False) or kept (return True).
+        :return: All grammar symbols (potentially including choice nodes) satisfying
+            the given filter criterion.
+        """
+
+        prop = self.graph.new_vertex_property("bool")
+
+        for vertex in self.graph.vertices():
+            prop[vertex] = filter_function(self.symbol(vertex))
+
+        # Create the new graph-tool graph as a filtered version of the original one.
+        return OrderedSet(
+            map(self.symbol, Graph(g=GraphView(self.graph, vfilt=prop)).vertices())
+        )
 
     def reachable(self, from_nonterminal: str, to_nonterminal: str) -> bool:
         """
@@ -525,7 +984,8 @@ class NeoGrammarGraph:
         if not paths:
             return []
 
-        sorted(paths, key=len)
+        # We sort paths by increasing length since we're interested in the shortest one.
+        paths = sorted(paths, key=len)
 
         result: List[str]
 
@@ -551,7 +1011,7 @@ class NeoGrammarGraph:
         target_symbol: str,
         node_filter: Callable[[int, str], bool] = lambda idx, _: idx % 2 == 0,
     ) -> Optional[OrderedSet[Tuple[str, ...]]]:
-        """
+        r"""
         Returns a list of all paths between the given grammar symbols.
 
         Example:
@@ -574,8 +1034,10 @@ class NeoGrammarGraph:
         There are two paths from :code:`<stmt>` to :code:`digit` if we omit the
         filtering of intermediate choice nodes:
 
-        >>> str(graph.paths_between("<stmt>", "<digit>", lambda idx, sym: True))
-        "{('<stmt>', '<stmt>-choice-1', '<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>'), ('<stmt>', '<stmt>-choice-2', '<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>')}"
+        >>> print("\n".join(map(
+        ...     str, graph.paths_between("<stmt>", "<digit>", lambda idx, sym: True))))
+        ('<stmt>', '<stmt>-choice-1', '<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>')
+        ('<stmt>', '<stmt>-choice-2', '<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>')
 
         With the default node filter, those paths collapse to a single one:
 
@@ -586,6 +1048,11 @@ class NeoGrammarGraph:
 
         >>> str(graph.paths_between("<digit>", "<digit>"))
         '{}'
+
+        Path computation for self-reachable symbols works as expected.
+
+        >>> str(graph.paths_between("<stmt>", "<stmt>"))
+        "{('<stmt>', '<stmt>')}"
 
         If a symbol does not exist, we obtain :code:`None`:
 
@@ -608,14 +1075,437 @@ class NeoGrammarGraph:
         if start_vertex is None or target_vertex is None:
             return None
 
-        return OrderedSet([
-            tuple([
-                self.symbol(self.graph.vertex(vid))
-                for idx, vid in enumerate(path)
-                if node_filter(idx, self.symbol(self.graph.vertex(vid)))
-            ])
-            for path in all_paths(self.graph, start_vertex, target_vertex)
-        ])
+        return OrderedSet(
+            [
+                tuple(
+                    [
+                        self.symbol(self.graph.vertex(vid))
+                        for idx, vid in enumerate(path)
+                        if node_filter(idx, self.symbol(self.graph.vertex(vid)))
+                    ]
+                )
+                for path in all_paths(self.graph, start_vertex, target_vertex)
+            ]
+        )
+
+    @lru_cache(maxsize=None)
+    def k_paths(
+        self,
+        k: int,
+        up_to: bool = False,
+        start_nonterminal: Optional[str] = None,
+        include_terminals=True,
+        graph: Optional[Graph] = None,
+    ) -> OrderedSet[Tuple[str, ...]]:
+        r"""
+        This function computes all paths of length k in the graph, optionally restricted
+        to those reachable from the nonterminal :code:`start_nonterminal`. If up_to
+        is True, also smaller paths are considered. "Choice nodes" are not considered in
+        the length computation, but are included in the returned results. k-paths ending
+        in terminal symbols are included if, and only if, include_nonterminals is True.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        The 1-paths in the graph correspond to the nonterminal symbols (dictionary
+        keys) in the underlying grammar.
+
+        >>> str(graph.k_paths(1, include_terminals=False))
+        "{('<start>',), ('<stmt>',), ('<assgn>',), ('<var>',), ('<rhs>',), ('<digit>',)}"
+
+        We can ask for paths starting at a particular nonterminal.
+
+        >>> print("\n".join(map(str, graph.k_paths(2, start_nonterminal="<digit>"))))
+        ('<digit>', '<digit>-choice-1', '0')
+        ('<digit>', '<digit>-choice-2', '1')
+        ('<digit>', '<digit>-choice-3', '2')
+        ('<digit>', '<digit>-choice-4', '3')
+        ('<digit>', '<digit>-choice-5', '4')
+        ('<digit>', '<digit>-choice-6', '5')
+        ('<digit>', '<digit>-choice-7', '6')
+        ('<digit>', '<digit>-choice-8', '7')
+        ('<digit>', '<digit>-choice-9', '8')
+        ('<digit>', '<digit>-choice-10', '9')
+
+        Paths ending in terminal symbols can be excluded on demand.
+
+        >>> print("\n".join(map(str, graph.k_paths(
+        ...     3,
+        ...     start_nonterminal="<assgn>",
+        ...     include_terminals=False))))
+        ('<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-1', '<var>')
+        ('<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>')
+
+        If up_to is set to True, we also obtain paths shorter than the set k.
+
+        >>> print("\n".join(map(str, graph.k_paths(
+        ...     3,
+        ...     start_nonterminal="<assgn>",
+        ...     up_to=True,
+        ...     include_terminals=False))))
+        ('<assgn>',)
+        ('<assgn>', '<assgn>-choice-1', '<var>')
+        ('<var>',)
+        ('<rhs>', '<rhs>-choice-1', '<var>')
+        ('<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-1', '<var>')
+        ('<assgn>', '<assgn>-choice-1', '<rhs>')
+        ('<rhs>',)
+        ('<rhs>', '<rhs>-choice-2', '<digit>')
+        ('<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>')
+        ('<digit>',)
+
+        For certain configurations, we might obtain an empty set of paths.
+
+        >>> str(graph.k_paths(
+        ...     4,
+        ...     start_nonterminal="<assgn>",
+        ...     include_terminals=False))
+        '{}'
+
+        :param k: The length of the paths to return. Maximal length if up_to is True,
+            otherwise the exact lenght.
+        :param up_to: Set to True iff you are interested also in paths shorter than k.
+        :param start_nonterminal: If present, only k-paths in the part of the grammar
+            reachable from this nonterminal will be considered.
+        :param include_terminals: Set to True iff you are interested in paths ending
+            in terminal symbols.
+        :param graph: An optional Graph object if the paths in another graph (such as
+            a ParseTree object) should be computed.
+        :return: The set of paths according to the chosen parameters.
+        """
+        if graph is None:
+            graph = self.graph
+
+        # Each path of k terminal/nonterminal nodes includes k-1 choice nodes
+        k += k - 1
+
+        path_map: Dict[Vertex, List[Tuple[Vertex, ...]]] = {}
+
+        class PathVisitor(BFSVisitor):
+            def examine_edge(self, e: Edge):
+                path_map.setdefault(e.source(), []).append((e.source(),))
+                path_map.setdefault(e.target(), []).append((e.source(), e.target()))
+
+                prefixes = [
+                    path for path in path_map.get(e.source(), []) if len(path) < k
+                ]
+                if not prefixes:
+                    return
+
+                path_map[e.target()].extend(
+                    [prefix + (e.target(),) for prefix in prefixes]
+                )
+
+        start_vertex = next(
+            v
+            for v in graph.vertices()
+            if graph.vp.label[v]
+            == (start_nonterminal if start_nonterminal is not None else "<start>")
+        )
+
+        bfs_search(graph, start_vertex, PathVisitor())
+
+        all_terminals = OrderedSet()
+        if not include_terminals:
+            all_terminals = grammar_terminals(self.grammar)
+
+        # We collect all the paths from `path_map` that do not start or end
+        # in a choice node and have a suitable length. Furthermore, we eliminate
+        # paths ending in terminal symbols if the corresponding flag is set.
+        paths = [
+            path
+            for path_set in path_map.values()
+            for path in path_set
+            if graph.vp.label[path[0]] not in self.choice_nodes
+            and graph.vp.label[path[-1]] not in self.choice_nodes
+            and (up_to or len(path) == k)
+            and graph.vp.label[path[-1]] not in all_terminals
+        ]
+
+        # For the final result, we convert vertex objects to grammar string symbols.
+        return OrderedSet([tuple([graph.vp.label[v] for v in path]) for path in paths])
+
+    def parse_tree_to_graph(self, tree: ParseTree) -> Graph:
+        r"""
+        Converts a ParseTree to a graph-tool Graph object.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        The following ParseTree can be derived from the above grammar:
+
+        >>> tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
+        ...        (' ; ', []),
+        ...        ('<stmt>',
+        ...         [('<assgn>',
+        ...           [('<var>', [('y', [])]),
+        ...            (' := ', []),
+        ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
+
+        We convert it to a graph...
+
+        >>> tree_graph = graph.parse_tree_to_graph(tree)
+
+        And assert that it is a tree.
+
+        >>> class TreeVisitor(BFSVisitor):
+        ...     def __init__(self):
+        ...         self.result = True
+        ...
+        ...     def non_tree_edge(self, e):
+        ...         self.result = False
+        ...         raise StopSearch()
+        >>> v = TreeVisitor()
+        >>> bfs_search(tree_graph, tree_graph.vertex(0), v)
+        >>> v.result
+        True
+
+        >>> print("\n".join(map(str, [
+        ...     (tree_graph.vp.label[e.source()], tree_graph.vp.label[e.target()])
+        ...     for e in tree_graph.edges()
+        ... ])))
+        ('<start>', '<start>-choice-1')
+        ('<start>-choice-1', '<stmt>')
+        ('<stmt>', '<stmt>-choice-1')
+        ('<stmt>-choice-1', '<assgn>')
+        ('<stmt>-choice-1', ' ; ')
+        ('<stmt>-choice-1', '<stmt>')
+        ('<assgn>', '<assgn>-choice-1')
+        ('<stmt>', '<stmt>-choice-2')
+        ('<assgn>-choice-1', '<var>')
+        ('<assgn>-choice-1', ' := ')
+        ('<assgn>-choice-1', '<rhs>')
+        ('<var>', '<var>-choice-24')
+        ('<rhs>', '<rhs>-choice-2')
+        ('<stmt>-choice-2', '<assgn>')
+        ('<assgn>', '<assgn>-choice-1')
+        ('<var>-choice-24', 'x')
+        ('<rhs>-choice-2', '<digit>')
+        ('<digit>', '<digit>-choice-2')
+        ('<assgn>-choice-1', '<var>')
+        ('<assgn>-choice-1', ' := ')
+        ('<assgn>-choice-1', '<rhs>')
+        ('<var>', '<var>-choice-25')
+        ('<rhs>', '<rhs>-choice-1')
+        ('<digit>-choice-2', '1')
+        ('<var>-choice-25', 'y')
+        ('<rhs>-choice-1', '<var>')
+        ('<var>', '<var>-choice-24')
+        ('<var>-choice-24', 'x')
+
+        :param tree: The parse tree to convert into a graph (with choice nodes).
+        :return: A Graph object corresponding to a derivation in this grammar graph,
+            including the right choice nodes.
+        """
+
+        graph = Graph()
+        graph.vp.label = graph.new_vertex_property("string")
+
+        root = graph.add_vertex()
+
+        stack = [(tree, root)]
+        while stack:
+            (label, children), v = stack.pop(0)
+            graph.vp.label[v] = label
+
+            if not children:
+                continue
+
+            assert label not in self.choice_nodes
+            choice_node = next(
+                node
+                for node in self.children(label)
+                if self.children(node) == list(map(lambda child: child[0], children))
+            )
+
+            choice_node_vertex = graph.add_vertex()
+            graph.vp.label[choice_node_vertex] = choice_node
+            graph.add_edge(v, choice_node_vertex)
+
+            for child in children:
+                child_vertex = graph.add_vertex()
+                stack.append((child, child_vertex))
+                graph.add_edge(choice_node_vertex, child_vertex)
+
+        return graph
+
+    def k_paths_in_tree(
+        self,
+        tree: ParseTree,
+        k: int,
+        include_potential_paths=True,
+        include_terminals=True,
+    ) -> OrderedSet[Tuple[str, ...]]:
+        r"""
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        The following ParseTree can be derived from the above grammar:
+
+        >>> tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
+        ...        (' ; ', []),
+        ...        ('<stmt>',
+        ...         [('<assgn>',
+        ...           [('<var>', [('y', [])]),
+        ...            (' := ', []),
+        ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
+
+        >>> print("\n".join(map(str, graph.k_paths_in_tree(
+        ...     tree, 3, include_potential_paths=False, include_terminals=True))))
+        ('<start>', '<start>-choice-1', '<stmt>', '<stmt>-choice-1', '<assgn>')
+        ('<start>', '<start>-choice-1', '<stmt>', '<stmt>-choice-1', ' ; ')
+        ('<start>', '<start>-choice-1', '<stmt>', '<stmt>-choice-1', '<stmt>')
+        ('<stmt>', '<stmt>-choice-1', '<assgn>', '<assgn>-choice-1', '<var>')
+        ('<stmt>', '<stmt>-choice-1', '<assgn>', '<assgn>-choice-1', ' := ')
+        ('<stmt>', '<stmt>-choice-1', '<assgn>', '<assgn>-choice-1', '<rhs>')
+        ('<stmt>', '<stmt>-choice-1', '<stmt>', '<stmt>-choice-2', '<assgn>')
+        ('<assgn>', '<assgn>-choice-1', '<var>', '<var>-choice-24', 'x')
+        ('<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>')
+        ('<stmt>', '<stmt>-choice-2', '<assgn>', '<assgn>-choice-1', '<var>')
+        ('<stmt>', '<stmt>-choice-2', '<assgn>', '<assgn>-choice-1', ' := ')
+        ('<stmt>', '<stmt>-choice-2', '<assgn>', '<assgn>-choice-1', '<rhs>')
+        ('<rhs>', '<rhs>-choice-2', '<digit>', '<digit>-choice-2', '1')
+        ('<assgn>', '<assgn>-choice-1', '<var>', '<var>-choice-25', 'y')
+        ('<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-1', '<var>')
+        ('<rhs>', '<rhs>-choice-1', '<var>', '<var>-choice-24', 'x')
+
+        >>> print("\n".join(map(str, graph.k_paths_in_tree(
+        ...     tree, 3, include_potential_paths=False, include_terminals=False))))
+        ('<start>', '<start>-choice-1', '<stmt>', '<stmt>-choice-1', '<assgn>')
+        ('<start>', '<start>-choice-1', '<stmt>', '<stmt>-choice-1', '<stmt>')
+        ('<stmt>', '<stmt>-choice-1', '<assgn>', '<assgn>-choice-1', '<var>')
+        ('<stmt>', '<stmt>-choice-1', '<assgn>', '<assgn>-choice-1', '<rhs>')
+        ('<stmt>', '<stmt>-choice-1', '<stmt>', '<stmt>-choice-2', '<assgn>')
+        ('<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-2', '<digit>')
+        ('<stmt>', '<stmt>-choice-2', '<assgn>', '<assgn>-choice-1', '<var>')
+        ('<stmt>', '<stmt>-choice-2', '<assgn>', '<assgn>-choice-1', '<rhs>')
+        ('<assgn>', '<assgn>-choice-1', '<rhs>', '<rhs>-choice-1', '<var>')
+
+        >>> tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
+        ...        (' ; ', []),
+        ...        ('<stmt>',
+        ...         [('<assgn>', None)])])])
+
+
+        >>> print("\n".join(map(str, graph.k_paths_in_tree(
+        ...     tree, 3, include_potential_paths=True, include_terminals=False))))
+
+        :param tree:
+        :param k:
+        :param include_potential_paths:
+        :param include_terminals:
+        :return:
+        """
+
+        tree_graph = self.parse_tree_to_graph(tree)
+
+        tree_k_paths = self.k_paths(
+            k,
+            graph=tree_graph,
+            up_to=False,
+            start_nonterminal="<start>",
+            include_terminals=include_terminals,
+        )
+
+        if not include_potential_paths:
+            return tree_k_paths
+
+        result = OrderedSet(tree_k_paths)
+
+        # Add to result:
+        #
+        # - All k-paths that start with a nonterminal reachable from a nonterminal
+        #   of some open tree leaf.
+        # - All grammar k-paths for which there is a non-empty suffix of a tree k-path
+        #   ending in a nonterminal that is a prefix of the grammar k-path.
+
+        leaf_nonterminals = [
+            tree_graph.vp.label[v]
+            for v in tree_graph.vertices()
+            if is_nonterminal(tree_graph.vp.label[v])
+        ]
+
+        grammar_k_paths = self.k_paths(
+            k,
+            up_to=False,
+            start_nonterminal="<start>",
+            include_terminals=include_terminals,
+        )
+
+        for other_path in grammar_k_paths.difference(set(result)):
+            if any(
+                self.reachable(leaf_nonterminal, other_path[0])
+                for leaf_nonterminal in leaf_nonterminals
+            ):
+                result.add(other_path)
+
+        for other_path in grammar_k_paths.difference(set(result)):
+            # Add other_path if there is a non-empty suffix of a tree k-path ending in
+            # a nonterminal that is a prefix of other_path.
+            # TODO
+            pass
+
+        assert False
 
     def save_to_dot(self, file_name: str) -> None:
         """

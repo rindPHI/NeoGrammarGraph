@@ -16,18 +16,18 @@ implemented features should work significantly more efficiently thanks to graph-
 
 ## Supported Features
 
+* Creating sub graphs
+* Filter abstraction
 * Reachability of grammar symbols.
 * Computing the shortest path or all paths between two grammar symbols.
+* Computing k-paths (paths of exactly length k) in grammars and derivation trees, and a
+  k-path coverage measure ([see this paper](https://ieeexplore.ieee.org/document/8952419)) of
+  derivation trees based on that.
 * Export to GraphViz DOT files.
 
 ## Planned Features
 
-* Creating sub graphs
-* Filter abstraction
 * Checking whether a (sub) graph represents a tree
-* Computing k-paths (paths of exactly length k) in grammars and derivation trees, and a 
-  k-path coverage measure ([see this paper](https://ieeexplore.ieee.org/document/8952419)) of 
-  derivation trees based on that.
 
 ## Install
 

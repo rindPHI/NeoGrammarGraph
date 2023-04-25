@@ -34,4 +34,4 @@ jobs:
           black_dir: "src/"
           flake8: true
           flake8_dir: "src/"
-          flake8_args: "--max-complexity=10 --max-line-length=127 --extend-ignore=E203"
+          flake8_args: "--max-complexity=10 --max-line-length=127 --extend-ignore=E203,E501"
