@@ -1,4 +1,3 @@
-# TODO: Document node class hierarchy
 from abc import ABC
 from dataclasses import dataclass
 

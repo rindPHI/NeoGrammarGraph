@@ -6,6 +6,9 @@
 
 ### Added
 
+- Converting derivation trees to graph-tool graphs
+- k-path computation for derivation trees
+
 ### Changed
 
 - Added a proper type hierarchy for graph nodes (not only structured strings).

@@ -1828,12 +1828,12 @@ class NeoGrammarGraph:
         >>> graph.save_to_dot("/tmp/grammar-graph.dot")
         >>> import pathlib
         >>> contents = pathlib.Path("/tmp/grammar-graph.dot").read_text()
-        >>> print(contents[:122])
+        >>> print(contents[:123])
         digraph G {
         0 [label="<start> (0)"];
         1 [label="<start>-choice (0)"];
         2 [label="<stmt> (0)"];
-        3 [label="<stmt>-choice (0)"]
+        3 [label="<stmt>-choice (0)"];
 
         >>> graph.save_to_dot("/tmp/no-dot-file.txt")
         >>> pathlib.Path("/tmp/no-dot-file.txt").exists()
