@@ -10,9 +10,7 @@
 Creating graphs from context-free grammars for fun and profit.
 
 This project is a re-implementation of [GrammarGraph](https://github.com/rindPHI/GrammarGraph/)
-based on the efficient [graph-tool](https://graph-tool.skewed.de/) library. As of now,
-it does not support the full set of features supported by GrammarGraph; however, all
-implemented features should work significantly more efficiently thanks to graph-tool.
+based on the efficient [graph-tool](https://graph-tool.skewed.de/) library.
 
 ## Supported Features
 
