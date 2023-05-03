@@ -2,6 +2,14 @@
 
 ## [unreleased]
 
+## [0.1.0] - 2023-05-03
+
+### Added
+
+### Changed
+
+- Added a proper type hierarchy for graph nodes (not only structured strings).
+
 ## [0.0.5] - 2023-04-21
 
 ### Added
