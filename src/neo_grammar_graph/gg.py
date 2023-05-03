@@ -150,8 +150,12 @@ class NeoGrammarGraph:
                 )
                 self.graph.ep.label[nonterminal_choice_edge] = alternative_nr
 
+                # If `alternative` is the empty expansion (epsilon), we still have to
+                # ensure that an epsilon terminal node is added even though
+                # `split_expansion` would return an empty list. Thus, we keep a custom
+                # singleton list containing an empty string in that case.
                 for elem_nr, expansion_element in enumerate(
-                    split_expansion(alternative)
+                    split_expansion(alternative) or ['']
                 ):
                     ident = len(
                         self.symbol_to_vertices.setdefault(
@@ -200,14 +204,6 @@ class NeoGrammarGraph:
                 for child_nr, child_vertex in enumerate(primary_vertex.out_neighbors()):
                     edge = self.graph.add_edge(reference_vertex, child_vertex)
                     self.graph.ep.label[edge] = child_nr
-
-            # self.graph.add_edge_list(
-            #     [
-            #         (reference_vertex, child_vertex)
-            #         for reference_vertex in reference_vertices
-            #         for child_vertex in primary_vertex.out_neighbors()
-            #     ]
-            # )
 
     def __eq__(self, other: Any) -> bool:
         """
@@ -1570,6 +1566,78 @@ class NeoGrammarGraph:
                 graph.add_edge(choice_node_vertex, child_vertex)
 
         return graph
+
+    def tree_is_valid(self, tree: ParseTree) -> bool:
+        """
+        Checks whether the given parse tree is valid with respect to this grammar graph.
+
+        Example:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        The following tree results from parsing the expression :code:`x := 1` in the
+        above grammar.
+
+        >>> tree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])])])])
+
+        Thus, it is a valid tree.
+
+        >>> graph.tree_is_valid(tree)
+        True
+
+        If we change one nonterminal to a non-existent one, we obtain an invalid tree:
+
+        >>> tree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<ASSGN>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])])])])
+
+        >>> graph.tree_is_valid(tree)
+        False
+
+        Generally, the root of the derivation tree must be :code:`<start>` for this
+        method to return True. If you want to validate a sub tree, you must before
+        extract the appropriate subgrammar graph and, if needed, add a new
+        :code:`<start>` nonterminal root.
+
+        >>> graph.tree_is_valid(("<asdf>", None))
+        False
+
+        :param tree: The tree the validity of which should be evaluated.
+        :return: True iff the given tree is valid w.r.t. this grammar graph (note:
+            not a subgraph of the grammar graph).
+        """
+
+        if tree[0] != "<start>":
+            return False
+
+        try:
+            self.parse_tree_to_graph(tree)
+            return True
+        except InvalidTreeException:
+            return False
 
     def k_paths_in_tree(
         self,

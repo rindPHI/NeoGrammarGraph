@@ -2,6 +2,16 @@
 
 ## [unreleased]
 
+## [0.1.1] - 2023-05-03
+
+### Added
+
+- Validity check for derivation trees.
+
+### Changed
+
+- Corrected representation of grammars with epsilon expansions.
+
 ## [0.1.0] - 2023-05-03
 
 ### Added
