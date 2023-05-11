@@ -2,6 +2,15 @@
 
 ## [unreleased]
 
+## [0.2.0] - 2023-05-11
+
+### Changed
+
+- Bug fix in computation of k-paths; before, the start symbol was not correctly handled
+  and k-paths for reference nodes were faulty.
+- One can now specify multiple start nodes for the computation of k-paths. The parameter
+  `start_node` has become `start_nodes`.
+
 ## [0.1.1] - 2023-05-03
 
 ### Added

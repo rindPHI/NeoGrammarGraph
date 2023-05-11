@@ -17,7 +17,7 @@
 # along with NeoGrammarGraph.  If not, see <http://www.gnu.org/licenses/>.
 import os.path
 from functools import lru_cache
-from typing import Dict, List, Callable, Optional, Tuple, Any, cast
+from typing import Dict, List, Callable, Optional, Tuple, Any, cast, Sequence
 
 from bidict import MutableBidict, bidict
 from graph_tool import Graph, Vertex, Edge, GraphView
@@ -155,7 +155,7 @@ class NeoGrammarGraph:
                 # `split_expansion` would return an empty list. Thus, we keep a custom
                 # singleton list containing an empty string in that case.
                 for elem_nr, expansion_element in enumerate(
-                    split_expansion(alternative) or ['']
+                    split_expansion(alternative) or [""]
                 ):
                     ident = len(
                         self.symbol_to_vertices.setdefault(
@@ -881,14 +881,14 @@ class NeoGrammarGraph:
         The shortest path between :code:`<stmt>` and :code:`<digit>` in the above
         grammar consists of four nonterminals:
 
-        >>> print(", ".join(map(str, graph.shortest_path("<stmt>", "<digit>"))))
+        >>> print(path_to_str(graph.shortest_path("<stmt>", "<digit>")))
         <stmt> (0), <assgn> (0), <rhs> (0), <digit> (0)
 
         If we relax the default :code:`node_filter`, we are also presented the
         "choice nodes:"
 
-        >>> print(", ".join(map(str,
-        ...     graph.shortest_path("<stmt>", "<digit>", lambda _: True))))
+        >>> print(path_to_str(
+        ...     graph.shortest_path("<stmt>", "<digit>", lambda _: True)))
         <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
 
         For unconnected nonterminals (grammar graphs are directed!), we obtain an empty
@@ -901,8 +901,8 @@ class NeoGrammarGraph:
         one than the start node (though they share the same nonterminal symbol), since
         the nonterminal is reached via a different context.
 
-        >>> print(", ".join(map(str,
-        ...     graph.shortest_path("<stmt>", "<stmt>", lambda _: True))))
+        >>> print(path_to_str(
+        ...     graph.shortest_path("<stmt>", "<stmt>", lambda _: True)))
         <stmt> (0), <stmt>-choice (0), <stmt> (1)
 
         Reachability is not reflexive: If there is no path of at least one edge between
@@ -919,12 +919,12 @@ class NeoGrammarGraph:
         Nodes in the result can be arbitrarily filtered; let's take out the source
         nonterminal:
 
-        >>> print(", ".join(map(str, graph.shortest_path(
+        >>> print(path_to_str(graph.shortest_path(
         ...     "<stmt>",
         ...     "<digit>",
         ...     lambda node: (
         ...         not isinstance(node, NonterminalNode) or
-        ...         node.value != "<stmt>")))))
+        ...         node.value != "<stmt>"))))
         <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
 
         :param source_symbol: The start nonterminal for the computation of a
@@ -996,17 +996,17 @@ class NeoGrammarGraph:
         The shortest path between :code:`<stmt>` and :code:`<digit>` in the above
         grammar consists of four nonterminals:
 
-        >>> print(", ".join(map(str, graph.shortest_path_between_nodes(
-        ...     NonterminalNode(0, "<stmt>"), NonterminalNode(0, "<digit>")))))
+        >>> print(path_to_str(graph.shortest_path_between_nodes(
+        ...     NonterminalNode(0, "<stmt>"), NonterminalNode(0, "<digit>"))))
         <stmt> (0), <assgn> (0), <rhs> (0), <digit> (0)
 
         If we relax the default :code:`node_filter`, we are also presented the
         "choice nodes:"
 
-        >>> print(", ".join(map(str, graph.shortest_path_between_nodes(
+        >>> print(path_to_str(graph.shortest_path_between_nodes(
         ...     NonterminalNode(0, "<stmt>"),
         ...     NonterminalNode(0, "<digit>"),
-        ...     lambda node: True))))
+        ...     lambda node: True)))
         <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
 
         For unconnected nonterminals (grammar graphs are directed!), we obtain an empty
@@ -1049,12 +1049,12 @@ class NeoGrammarGraph:
         Nodes in the result can be arbitrarily filtered; let's take out the source
         nonterminal:
 
-        >>> print(", ".join(map(str, graph.shortest_path_between_nodes(
+        >>> print(path_to_str(graph.shortest_path_between_nodes(
         ...     NonterminalNode(0, "<stmt>"),
         ...     NonterminalNode(0, "<digit>"),
         ...     lambda node: (
         ...         not isinstance(node, NonterminalNode) or
-        ...         node.value != "<stmt>")))))
+        ...         node.value != "<stmt>"))))
         <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
 
         :param source_node: The start node for the computation of a shortest path.
@@ -1134,9 +1134,7 @@ class NeoGrammarGraph:
 
         There are three paths from :code:`<stmt>` to :code:`digit`:
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
-        ...     graph.paths_between("<stmt>", "<digit>"))))
+        >>> print(paths_to_str(graph.paths_between("<stmt>", "<digit>")))
         <stmt> (0), <assgn> (0), <rhs> (0), <digit> (0)
         <stmt> (0), <stmt> (1), <assgn> (1), <rhs> (0), <digit> (0)
         <stmt> (0), <assgn> (1), <rhs> (0), <digit> (0)
@@ -1145,9 +1143,7 @@ class NeoGrammarGraph:
         :code:`start_node` passed as string. However, this method also accepts
         Node objects for one or both source/target arguments:
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
-        ...     graph.paths_between(NonterminalNode(1, "<stmt>"), "<digit>"))))
+        >>> print(paths_to_str(graph.paths_between(NonterminalNode(1, "<stmt>"), "<digit>")))
         <stmt> (1), <assgn> (0), <rhs> (0), <digit> (0)
         <stmt> (1), <assgn> (1), <rhs> (0), <digit> (0)
 
@@ -1163,9 +1159,7 @@ class NeoGrammarGraph:
 
         Path computation for self-reachable symbols works as expected.
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
-        ...     graph.paths_between("<stmt>", "<stmt>", lambda _: True))))
+        >>> print(paths_to_str(graph.paths_between("<stmt>", "<stmt>", lambda _: True)))
         <stmt> (0), <stmt>-choice (0), <stmt> (1)
 
         If a symbol does not exist, we obtain :code:`None`:
@@ -1216,7 +1210,7 @@ class NeoGrammarGraph:
         self,
         k: int,
         up_to: bool = False,
-        start_node: Optional[str | Node] = None,
+        start_nodes: Optional[Tuple[str | Node, ...]] = None,
         include_terminals=True,
         graph: Optional[Graph] = None,
     ) -> OrderedSet[Tuple[Node, ...]]:
@@ -1247,9 +1241,7 @@ class NeoGrammarGraph:
         The 1-paths in the graph correspond to the nonterminal symbols (dictionary
         keys) in the underlying grammar in different contexts.
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
-        ...     graph.k_paths(1, include_terminals=False))))
+        >>> print(paths_to_str(graph.k_paths(1, include_terminals=False)))
         <start> (0)
         <stmt> (0)
         <assgn> (0)
@@ -1262,9 +1254,7 @@ class NeoGrammarGraph:
 
         We can ask for paths starting at a particular nonterminal.
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
-        ...     graph.k_paths(2, start_node="<digit>"))))
+        >>> print(paths_to_str(graph.k_paths(2, start_nodes=("<digit>",))))
         <digit> (0), <digit>-choice (0), '0' (0)
         <digit> (0), <digit>-choice (1), '1' (0)
         <digit> (0), <digit>-choice (2), '2' (0)
@@ -1278,41 +1268,46 @@ class NeoGrammarGraph:
 
         Paths ending in terminal symbols can be excluded on demand.
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
+        >>> print(paths_to_str(
         ...     graph.k_paths(
         ...         3,
-        ...         start_node="<assgn>",
-        ...         include_terminals=False))))
+        ...         start_nodes=("<assgn>",),
+        ...         include_terminals=False)))
+        <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (0), <var> (1)
+        <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
+        <assgn> (1), <assgn>-choice (0), <rhs> (0), <rhs>-choice (0), <var> (1)
+        <assgn> (1), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
+
+        We can also ask for the paths starting from a particular *node* and not all
+        nodes (including reference nodes) for a nonterminal:
+
+        >>> print(paths_to_str(
+        ...     graph.k_paths(
+        ...         3,
+        ...         start_nodes=(graph.nodes("<assgn>")[0],),
+        ...         include_terminals=False)))
         <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (0), <var> (1)
         <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
 
         If up_to is set to True, we also obtain paths shorter than the set k.
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
+        >>> print(paths_to_str(
         ...     graph.k_paths(
         ...         3,
-        ...         start_node="<assgn>",
+        ...         start_nodes=(graph.nodes("<assgn>")[0],),
         ...         up_to=True,
-        ...         include_terminals=False))))
+        ...         include_terminals=False)))
         <assgn> (0)
         <assgn> (0), <assgn>-choice (0), <var> (0)
-        <var> (0)
         <assgn> (0), <assgn>-choice (0), <rhs> (0)
-        <rhs> (0)
-        <rhs> (0), <rhs>-choice (0), <var> (1)
         <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (0), <var> (1)
-        <var> (1)
-        <rhs> (0), <rhs>-choice (1), <digit> (0)
         <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
-        <digit> (0)
 
         For certain configurations, we might obtain an empty set of paths.
 
         >>> print(graph.k_paths(
         ...     4,
-        ...     start_node="<assgn>",
+        ...     start_nodes=("<assgn>",),
         ...     include_terminals=False))
         {}
 
@@ -1343,66 +1338,66 @@ class NeoGrammarGraph:
         # Each path of k terminal/nonterminal nodes includes k-1 choice nodes
         k += k - 1
 
-        path_map: Dict[Vertex, List[Tuple[Vertex, ...]]] = {}
-
-        class PathVisitor(BFSVisitor):
-            def examine_edge(self, e: Edge):
-                path_map.setdefault(e.source(), []).append((e.source(),))
-                path_map.setdefault(e.target(), []).append((e.source(), e.target()))
-
-                prefixes = [
-                    path for path in path_map.get(e.source(), []) if len(path) < k
-                ]
-                if not prefixes:
-                    return
-
-                path_map[e.target()].extend(
-                    [prefix + (e.target(),) for prefix in prefixes]
-                )
-
-        if start_node is None:
-            start_node = NonterminalNode(0, "<start>")
-        else:
-            start_nodes = self.nodes(start_node)
-            assert start_nodes
-            start_node = start_nodes[0]
-
         if "node" in graph.vp:
 
-            def vertex_to_node(vertex: Vertex) -> Node:
-                result = graph.vp.node[vertex]
-                assert isinstance(result, Node)
-                return result
+            def vertex_to_node(vertex: int | Vertex) -> Node:
+                node = graph.vp.node[vertex]
+                assert isinstance(node, Node)
+                return node
 
-            start_vertex = graph.vertex(0)
-            assert vertex_to_node(start_vertex) == start_node
         else:
 
             def vertex_to_node(vertex: Vertex) -> Node:
                 return self.vertex_to_node[vertex]
 
-            start_vertex = self.vertex_to_node.inverse[start_node]
+        if start_nodes is None:
+            start_vertices = [
+                vertex
+                for vertex in graph.vertices()
+                if isinstance(vertex_to_node(vertex), NonterminalNode)
+            ]
+        else:
+            start_vertices = [
+                node for elem in start_nodes for node in self.vertices(elem)
+            ]
 
-        bfs_search(graph, start_vertex, PathVisitor())
+        result_vertex_paths: OrderedSet[Tuple[Vertex, ...]] = OrderedSet()
 
-        # We collect all the paths from `path_map` that do not start or end
-        # in a choice node and have a suitable length. Furthermore, we eliminate
-        # paths ending in terminal symbols if the corresponding flag is set.
-        paths = [
-            path
-            for path_set in path_map.values()
-            for path in path_set
-            if not isinstance(vertex_to_node(path[0]), ChoiceNode)
-            and not isinstance(vertex_to_node(path[-1]), ChoiceNode)
-            and (up_to or len(path) == k)
-            and (
-                include_terminals
-                or not isinstance(vertex_to_node(path[-1]), TerminalNode)
-            )
-        ]
+        for vertex in start_vertices:
+            result_for_node: Dict[int, OrderedSet[Tuple[Vertex, ...]]] = {
+                1: OrderedSet([(vertex,)])
+            }
 
-        # For the final result, we convert vertex objects to grammar string symbols.
-        return OrderedSet([tuple([vertex_to_node(v) for v in path]) for path in paths])
+            for depth in range(k - 1):
+                result_for_node[depth + 2] = OrderedSet(
+                    [
+                        path + (child,)
+                        for path in result_for_node[depth + 1]
+                        for child in graph.get_out_neighbors(path[-1])
+                        if include_terminals
+                        or not isinstance(vertex_to_node(child), TerminalNode)
+                    ]
+                )
+
+            if up_to:
+                result_vertex_paths.update(
+                    [
+                        path
+                        for depth, paths in result_for_node.items()
+                        if depth % 2
+                        for path in paths
+                    ]
+                )
+            else:
+                assert k in result_for_node
+                result_vertex_paths.update(result_for_node[k])
+
+        return OrderedSet(
+            [
+                tuple([vertex_to_node(vertex) for vertex in vertex_path])
+                for vertex_path in result_vertex_paths
+            ]
+        )
 
     def parse_tree_to_graph(self, tree: ParseTree) -> Graph:
         r"""
@@ -1691,9 +1686,7 @@ class NeoGrammarGraph:
 
         This is the set of all 3-paths in this tree.
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
-        ...     graph.k_paths_in_tree(tree, 3, include_terminals=True))))
+        >>> print(paths_to_str(graph.k_paths_in_tree(tree, 3, include_terminals=True)))
         <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <assgn> (0)
         <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), ' ; ' (0)
         <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <stmt> (1)
@@ -1713,10 +1706,8 @@ class NeoGrammarGraph:
 
         Optionally, we can exclude the paths ending in terminal symbols:
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
-        ...     graph.k_paths_in_tree(
-        ...         tree, 3, include_terminals=False))))
+        >>> print(paths_to_str(graph.k_paths_in_tree(
+        ...         tree, 3, include_terminals=False)))
         <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <assgn> (0)
         <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <stmt> (1)
         <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <var> (0)
@@ -1746,10 +1737,8 @@ class NeoGrammarGraph:
         First, let us inspect the "concrete" paths (without terminal symbols) in this
         cropped tree:
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
-        ...     graph.k_paths_in_tree(
-        ...         tree, 3, include_potential_paths=False, include_terminals=False))))
+        >>> print(paths_to_str(graph.k_paths_in_tree(
+        ...         tree, 3, include_potential_paths=False, include_terminals=False)))
         <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <assgn> (0)
         <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <stmt> (1)
         <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <var> (0)
@@ -1763,10 +1752,8 @@ class NeoGrammarGraph:
         :code:`<assgn> (1)` node and passing the open :code:`<rhs> (0)` node are added
         to the result:
 
-        >>> print("\n".join(map(
-        ...     lambda path: ", ".join(map(str, path)),
-        ...     graph.k_paths_in_tree(
-        ...         tree, 3, include_potential_paths=True, include_terminals=False))))
+        >>> print(paths_to_str(graph.k_paths_in_tree(
+        ...         tree, 3, include_potential_paths=True, include_terminals=False)))
         <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <assgn> (0)
         <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <stmt> (1)
         <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <var> (0)
@@ -1804,7 +1791,6 @@ class NeoGrammarGraph:
             k,
             graph=tree_graph,
             up_to=False,
-            start_node="<start>",
             include_terminals=include_terminals,
         )
 
@@ -1832,7 +1818,6 @@ class NeoGrammarGraph:
         grammar_k_paths = self.k_paths(
             k,
             up_to=False,
-            start_node="<start>",
             include_terminals=include_terminals,
         )
 
@@ -1929,3 +1914,71 @@ class InvalidTreeException(Exception):
     """
 
     pass
+
+
+def path_to_str(path: Sequence[Node], separator: str = ", ") -> str:
+    """
+    Converts a path (list of nodes) to a :code:`separator`-separated string.
+
+    >>> path_to_str([
+    ...     NonterminalNode(ident=0, value='<stmt>'),
+    ...     ChoiceNode(ident=0, parent_nonterminal='<stmt>'),
+    ...     NonterminalNode(ident=0, value='<assgn>'),
+    ...     ChoiceNode(ident=0, parent_nonterminal='<assgn>'),
+    ...     NonterminalNode(ident=0, value='<rhs>'),
+    ...     ChoiceNode(ident=1, parent_nonterminal='<rhs>'),
+    ...     NonterminalNode(ident=0, value='<digit>')])
+    '<stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)'
+
+    :param path: The path to convert.
+    :param separator: The separator to insert between nodes.
+    :return: A string representation of the path.
+    """
+
+    return separator.join(map(str, path))
+
+
+def paths_to_str(
+    paths: Sequence[Sequence[Node]],
+    path_separator: str = "\n",
+    node_separator: str = ", ",
+) -> str:
+    """
+    Converts a list of paths (a path is a list of nodes) to a string.
+
+    >>> print(paths_to_str([
+    ...     (
+    ...         NonterminalNode(ident=0, value='<start>'),
+    ...         ChoiceNode(ident=0, parent_nonterminal='<start>'),
+    ...         NonterminalNode(ident=0, value='<stmt>'),
+    ...         ChoiceNode(ident=0, parent_nonterminal='<stmt>'),
+    ...         NonterminalNode(ident=0, value='<assgn>'),
+    ...     ),
+    ...     (
+    ...         NonterminalNode(ident=0, value='<start>'),
+    ...         ChoiceNode(ident=0, parent_nonterminal='<start>'),
+    ...         NonterminalNode(ident=0, value='<stmt>'),
+    ...         ChoiceNode(ident=0, parent_nonterminal='<stmt>'),
+    ...         TerminalNode(ident=0, value=' ; '),
+    ...     ),
+    ...     (
+    ...         NonterminalNode(ident=0, value='<start>'),
+    ...         ChoiceNode(ident=0, parent_nonterminal='<start>'),
+    ...         NonterminalNode(ident=0, value='<stmt>'),
+    ...         ChoiceNode(ident=0, parent_nonterminal='<stmt>'),
+    ...         NonterminalNode(ident=1, value='<stmt>'),
+    ...     )
+    ... ]))
+    <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <assgn> (0)
+    <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), ' ; ' (0)
+    <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <stmt> (1)
+
+    :param paths: The paths to convert to a string.
+    :param path_separator: The separator to insert between paths.
+    :param node_separator: The separator to insert between nodes.
+    :return: A string representation of the paths.
+    """
+
+    return path_separator.join(
+        map(lambda path: path_to_str(path, separator=node_separator), paths)
+    )
