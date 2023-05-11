@@ -775,6 +775,7 @@ class NeoGrammarGraph:
             map(self.node, Graph(g=GraphView(self.graph, vfilt=prop)).vertices())
         )
 
+    @lru_cache(maxsize=None)
     def reachable(self, from_symbol: str | Node, to_symbol: str | Node) -> bool:
         """
         Checks whether the nonterminal symbol :code:`to_nonterminal` is reachable
@@ -964,8 +965,8 @@ class NeoGrammarGraph:
 
     def shortest_path_between_nodes(
         self,
-        source_node: str | Node,
-        target_node: str | Node,
+        source_node: Node,
+        target_node: Node,
         node_filter: Callable[[Node], bool] = lambda node: not isinstance(
             node, ChoiceNode
         ),
@@ -1070,6 +1071,33 @@ class NeoGrammarGraph:
             that nonterminal to itself, the returned list contains one element, which
             is that nonterminal.
         """
+
+        result = self.__shortest_path_between_nodes(source_node, target_node)
+        if result is None:
+            return None
+
+        return [node for node in result if node_filter(node)]
+
+    @lru_cache(maxsize=None)
+    def __shortest_path_between_nodes(
+        self,
+        source_node: Node,
+        target_node: Node,
+    ) -> Optional[List[Node]]:
+        """
+        Like :meth:`neo_grammar_graph.NeoGrammarGraph.shortest_path_between_nodes`,
+        but without a :code:`node_filter`. Used for caching.
+
+        :param source_node: The start node for the computation of a shortest path.
+        :param target_node: The destination node for the computation of a shortest path.
+        :return: A possibly empty list of nonterminals connecting the source and target
+            nonterminals in the graph. Any nonempty returned list begins with
+            :code:`source_nonterminal` and ends with :code:`target_nonterminal`. If
+            source and target nonterminals are identical and there is a connection from
+            that nonterminal to itself, the returned list contains one element, which
+            is that nonterminal.
+        """
+
         source_vertex = self.vertex_to_node.inverse.get(source_node, None)
         target_vertex = self.vertex_to_node.inverse.get(target_node, None)
 
@@ -1102,7 +1130,7 @@ class NeoGrammarGraph:
             result.insert(0, self.vertex_to_node[pred_vertex])
             current_vertex = pred_vertex
 
-        return [node for node in result if node_filter(node)]
+        return result
 
     def paths_between(
         self,
@@ -1318,8 +1346,8 @@ class NeoGrammarGraph:
         :param k: The length of the paths to return. Maximal length if up_to is True,
             otherwise the exact lenght.
         :param up_to: Set to True iff you are interested also in paths shorter than k.
-        :param start_node: If present, only k-paths in the part of the grammar
-            reachable from this nonterminal will be considered.
+        :param start_nodes: If present, only k-paths in the part of the grammar
+            reachable from these nodes/nonterminals will be considered.
         :param include_terminals: Set to True iff you are interested in paths ending
             in terminal symbols.
         :param graph: An optional Graph object if the paths in another graph (such as

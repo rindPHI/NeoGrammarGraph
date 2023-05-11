@@ -2,6 +2,12 @@
 
 ## [unreleased]
 
+## [0.2.1] - 2023-05-11
+
+### Changed
+
+- Added caching to reachability and shortest paths.
+  
 ## [0.2.0] - 2023-05-11
 
 ### Changed
