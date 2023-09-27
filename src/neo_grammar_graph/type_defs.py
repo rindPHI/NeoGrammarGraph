@@ -3,6 +3,7 @@ from typing import List, Dict, Iterator, Optional, Protocol, Sequence
 
 NonterminalType = str
 Grammar = Dict[NonterminalType, List[str]]
+CanonicalGrammar = Dict[str, List[List[str]]]
 
 
 class ParseTree(Protocol):

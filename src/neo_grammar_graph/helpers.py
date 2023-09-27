@@ -3,7 +3,7 @@ from typing import List
 
 from orderedset import OrderedSet
 
-from neo_grammar_graph.type_defs import Grammar
+from neo_grammar_graph.type_defs import Grammar, CanonicalGrammar
 
 RE_NONTERMINAL = re.compile(r"(<[^<> ]*>)")
 
@@ -20,7 +20,7 @@ def split_expansion(expansion: str) -> List[str]:
         original order.
     """
 
-    return [token for token in re.split(RE_NONTERMINAL, expansion) if token]
+    return [token for token in RE_NONTERMINAL.split(expansion) if token]
 
 
 def is_nonterminal(symbol: str) -> bool:
@@ -105,3 +105,45 @@ def grammar_terminals(grammar: Grammar) -> OrderedSet[str]:
             for terminal_symbol in terminals(expansion)
         ]
     )
+
+
+def canonical(grammar: Grammar) -> CanonicalGrammar:
+    """
+    This function converts a grammar to a "canonical" form in which terminals and
+    nonterminals in expansion alternatives are split.
+
+    Example
+    -------
+
+    >>> import string
+    >>> grammar = {
+    ...     "<start>":
+    ...         ["<stmt>"],
+    ...     "<stmt>":
+    ...         ["<assgn> ; <stmt>", "<assgn>"],
+    ...     "<assgn>":
+    ...         ["<var> := <rhs>"],
+    ...     "<rhs>":
+    ...         ["<var>", "<digit>"],
+    ...     "<var>": list(string.ascii_lowercase),
+    ...     "<digit>": list(string.digits)
+    ... }
+
+    Before conversion, there are two entries for :code:`<stmt>` including sequences
+    of (non-)terminals:
+
+    >>> print(grammar["<stmt>"])
+    ['<assgn> ; <stmt>', '<assgn>']
+
+    After conversion, the entries are lists of individual (non)-terminals:
+
+    >>> print(canonical(grammar)["<stmt>"])
+    [['<assgn>', ' ; ', '<stmt>'], ['<assgn>']]
+
+    :param grammar: The grammar to convert.
+    :return: The converted canonical grammar.
+    """
+    return {
+        k: [split_expansion(expression) for expression in alternatives]
+        for k, alternatives in grammar.items()
+    }

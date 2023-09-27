@@ -2,6 +2,14 @@
 
 ## [unreleased]
 
+## [0.2.2] - 2023-09-27
+
+### Added
+
+- The canonical version of a grammar can be obtained via the :code:`canonical_grammar`
+  field. The canonical grammar is computed lazily; no performance overhead is to be
+  expected from this change.
+ 
 ## [0.2.1] - 2023-05-11
 
 ### Changed

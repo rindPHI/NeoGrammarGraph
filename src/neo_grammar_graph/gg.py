@@ -25,14 +25,14 @@ from graph_tool.search import bfs_search, BFSVisitor, StopSearch
 from graph_tool.topology import transitive_closure, all_paths
 from orderedset import OrderedSet
 
-from neo_grammar_graph.helpers import split_expansion, is_nonterminal
+from neo_grammar_graph.helpers import split_expansion, is_nonterminal, canonical
 from neo_grammar_graph.nodes import (
     ChoiceNode,
     Node,
     NonterminalNode,
     TerminalNode,
 )
-from neo_grammar_graph.type_defs import Grammar, ParseTree
+from neo_grammar_graph.type_defs import Grammar, ParseTree, CanonicalGrammar
 
 
 class NeoGrammarGraph:
@@ -87,6 +87,17 @@ class NeoGrammarGraph:
         installation (native, as graph-tool is implemented as a native libray) is
         required to use this module.
 
+        A :class:`~neo_grammar_graph.gg.NeoGrammarGraph` object stores the "canonical"
+        representation of the given grammar in the field :code:`canonical_grammar` for
+        convenience reasons of certain applications. Expansion alternatives in
+        canonical grammars contain individual (non-)terminal symbols in lists:
+
+        >>> graph.grammar["<stmt>"]
+        ['<assgn> ; <stmt>', '<assgn>']
+
+        >>> graph.canonical_grammar["<stmt>"]
+        [['<assgn>', ' ; ', '<stmt>'], ['<assgn>']]
+
         :param grammar: The grammar to construct the
             :class:`~neo_grammar_graph.NeoGrammarGraph` object from. The grammar must
             contain a nonterminal :code:`<start>` that is interpreted as the start
@@ -94,6 +105,7 @@ class NeoGrammarGraph:
         """
 
         self.grammar: Grammar = grammar
+        self.__canonical_grammar: Optional[CanonicalGrammar] = None
         self.graph: Graph = Graph()
         self.closure: Optional[Graph] = None
         self.vertex_to_node: MutableBidict[Vertex, Node] = bidict({})
@@ -103,6 +115,13 @@ class NeoGrammarGraph:
         self.__hash: Optional[int] = None
 
         self.__initialize_graph()
+
+    @property
+    def canonical_grammar(self) -> CanonicalGrammar:
+        if self.__canonical_grammar is None:
+            self.__canonical_grammar = canonical(self.grammar)
+
+        return self.__canonical_grammar
 
     def __initialize_graph(self) -> None:
         """
