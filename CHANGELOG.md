@@ -2,6 +2,12 @@
 
 ## [unreleased]
 
+## [0.2.3] - 2023-09-28
+
+### Added
+
+- More liberal type for grammars, now comprising both frozen and mutable structures.
+
 ## [0.2.2] - 2023-09-27
 
 ### Added
