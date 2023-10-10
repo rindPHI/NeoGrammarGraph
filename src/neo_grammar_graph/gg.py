@@ -1862,7 +1862,7 @@ class NeoGrammarGraph:
             if isinstance(tree_graph.vp.node[v], NonterminalNode)
         ]
 
-        open_leaf_nodes = [tree_graph.vp.node[v] for v in leaves_in_graph(tree_graph)]
+        open_leaf_nodes = [tree_graph.vp.node[v] for v in open_leaf_vertices]
 
         grammar_k_paths = self.k_paths(
             k,
