@@ -16,12 +16,14 @@
 # You should have received a copy of the GNU General Public License
 # along with NeoGrammarGraph.  If not, see <http://www.gnu.org/licenses/>.
 import os.path
-from functools import lru_cache
+from functools import cache
 from typing import Dict, List, Callable, Optional, Tuple, Any, cast, Sequence
 
+import numpy
 from bidict import MutableBidict, bidict
 from graph_tool import Graph, Vertex, Edge, GraphView
 from graph_tool.search import bfs_search, BFSVisitor, StopSearch
+from graph_tool.spectral import adjacency
 from graph_tool.topology import transitive_closure, all_paths
 from orderedset import OrderedSet
 
@@ -308,7 +310,7 @@ class NeoGrammarGraph:
                 hash(NeoGrammarGraph(grammar).subgraph("<start>"))
         True
 
-        :return: A has value for this graph.
+        :return: A hash value for this graph.
         """
 
         if self.__hash is None:
@@ -553,6 +555,7 @@ class NeoGrammarGraph:
 
         return self.vertex_to_node[vertex]
 
+    @cache
     def children(self, node: Node) -> Optional[List[Node]]:
         """
         Returns the immediate children of a Node in the graph. If the given
@@ -794,7 +797,7 @@ class NeoGrammarGraph:
             map(self.node, Graph(g=GraphView(self.graph, vfilt=prop)).vertices())
         )
 
-    @lru_cache(maxsize=None)
+    @cache
     def reachable(self, from_symbol: str | Node, to_symbol: str | Node) -> bool:
         """
         Checks whether the nonterminal symbol :code:`to_nonterminal` is reachable
@@ -1097,7 +1100,7 @@ class NeoGrammarGraph:
 
         return [node for node in result if node_filter(node)]
 
-    @lru_cache(maxsize=None)
+    @cache
     def __shortest_path_between_nodes(
         self,
         source_node: Node,
@@ -1252,7 +1255,7 @@ class NeoGrammarGraph:
             ]
         )
 
-    @lru_cache(maxsize=None)
+    @cache
     def k_paths(
         self,
         k: int,
@@ -1855,12 +1858,11 @@ class NeoGrammarGraph:
 
         open_leaf_vertices = [
             v
-            for v in tree_graph.vertices()
-            if bool(next(v.out_neighbors(), False)) is False
-            if is_nonterminal(tree_graph.vp.node[v].value)
+            for v in leaves_in_graph(tree_graph)
+            if isinstance(tree_graph.vp.node[v], NonterminalNode)
         ]
 
-        open_leaf_nodes = [tree_graph.vp.node[v] for v in open_leaf_vertices]
+        open_leaf_nodes = [tree_graph.vp.node[v] for v in leaves_in_graph(tree_graph)]
 
         grammar_k_paths = self.k_paths(
             k,
@@ -1953,6 +1955,21 @@ class NeoGrammarGraph:
             file_name += ".dot"
 
         self.graph.save(file_name)
+
+
+def leaves_in_graph(graph: Graph) -> Tuple[Vertex, ...]:
+    """
+    This function computes the leaves in a graph using matrix multiplication. It
+    returns the indices of all graph leaves.
+
+    :param graph: The graph to find leaves in.
+    :return: The leaf indices.
+    """
+
+    matrix = adjacency(graph)
+    v = numpy.array([1 for _ in range(numpy.shape(matrix)[0])])
+    prod = numpy.matmul(v, matrix.toarray())
+    return tuple(graph.vertex(i) for i, elem in enumerate(prod) if elem == [0])
 
 
 class InvalidTreeException(Exception):
