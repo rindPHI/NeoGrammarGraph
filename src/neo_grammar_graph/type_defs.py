@@ -1,9 +1,10 @@
 from abc import abstractmethod
-from typing import Iterator, Optional, Protocol, Sequence, Mapping
+from typing import Iterator, Optional, Protocol, Sequence, Mapping, Tuple
 
 NonterminalType = str
 Grammar = Mapping[NonterminalType, Sequence[str]]
 CanonicalGrammar = Mapping[str, Sequence[Sequence[str]]]
+Path = Tuple[int, ...]
 
 
 class ParseTree(Protocol):

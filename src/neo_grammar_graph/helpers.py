@@ -1,7 +1,11 @@
 import re
-from typing import List
+from typing import List, Any
 
+import returns
+from frozendict import frozendict
 from orderedset import OrderedSet
+from returns.maybe import Maybe, Some
+from returns.result import Result, Success, Failure
 
 from neo_grammar_graph.type_defs import Grammar, CanonicalGrammar
 
@@ -147,3 +151,119 @@ def canonical(grammar: Grammar) -> CanonicalGrammar:
         k: [split_expansion(expression) for expression in alternatives]
         for k, alternatives in grammar.items()
     }
+
+
+def deep_str(obj: Any) -> str:
+    """
+    This function computes a "deep" string representation of :code:`obj`. This means
+    that it also (recursively) invokes :code:`__str__` on all the elements of a list,
+    tuple, set, OrderedSet, dict, or Success/Failure container (from the returns
+    library).
+
+    Example:
+    --------
+
+    We constuct a simple class with different :code:`__str__` and :code:`__repr__`
+    implementations:
+
+    >>> class X:
+    ...     def __str__(self):
+    ...         return "'An X'"
+    ...     def __repr__(self):
+    ...         return "X()"
+
+    Invoking :code:`str` returns a "shallow" string representation:
+
+    >>> str((X(), X()))
+    '(X(), X())'
+
+    Invoking :code:`deep_str` also converts the elements of the tuple to a string:
+
+    >>> deep_str((X(), X()))
+    "('An X', 'An X')"
+
+    This also works for nested collections, such as a tuple in a list:
+
+    >>> deep_str([(X(),)])
+    "[('An X',)]"
+
+    It also works for dictionaries...
+
+    >>> deep_str({X(): [X()]})
+    "{'An X': ['An X']}"
+
+    ...frozen dictionaries...
+
+    >>> deep_str(frozendict({X(): [X()]}))
+    "{'An X': ['An X']}"
+
+    ...sets...
+
+    >>> deep_str({(X(),)})
+    "{('An X',)}"
+
+    ...frozen sets...
+
+    >>> deep_str(frozenset({(X(),)}))
+    "{('An X',)}"
+
+    ...and ordered sets.
+
+    >>> deep_str(OrderedSet({(X(),)}))
+    "{('An X',)}"
+
+    As a special gimick, the function also works for the returns library's Success
+    and Failure containers:
+
+    >>> deep_str(returns.result.Success([X(), X()]))
+    "<Success: ['An X', 'An X']>"
+
+    >>> deep_str(returns.result.Failure([X(), X()]))
+    "<Failure: ['An X', 'An X']>"
+
+    If the string representation of an object is empty, its :code:`repr` is returned:
+
+    >>> str(StopIteration())
+    ''
+
+    >>> deep_str(StopIteration())
+    'StopIteration()'
+
+    :param obj: The object to recursively convert into a string.
+    :return: A "deep" string representation of :code:`obj`.
+    """
+
+    if isinstance(obj, tuple):
+        return (
+            "(" + ", ".join(map(deep_str, obj)) + ("," if len(obj) == 1 else "") + ")"
+        )
+    elif isinstance(obj, list):
+        return "[" + ", ".join(map(deep_str, obj)) + "]"
+    elif (
+        isinstance(obj, set)
+        or isinstance(obj, OrderedSet)
+        or isinstance(obj, frozenset)
+    ):
+        return "{" + ", ".join(map(deep_str, obj)) + "}"
+    elif isinstance(obj, dict) or isinstance(obj, frozendict):
+        return (
+            "{"
+            + ", ".join([f"{deep_str(a)}: {deep_str(b)}" for a, b in obj.items()])
+            + "}"
+        )
+    elif isinstance(obj, Maybe):
+        match obj:
+            case Some(elem):
+                return str(Some(deep_str(elem)))
+            case returns.maybe.Nothing:
+                return str(obj)
+    elif isinstance(obj, Result):
+        match obj:
+            case Success(inner):
+                return str(Success(deep_str(inner)))
+            case returns.result.Failure(inner):
+                return str(Failure(deep_str(inner)))
+    elif not str(obj):
+        return repr(obj)
+    else:
+        return str(obj)

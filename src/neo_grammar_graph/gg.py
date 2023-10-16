@@ -21,11 +21,13 @@ from typing import Dict, List, Callable, Optional, Tuple, Any, cast, Sequence
 
 import numpy
 from bidict import MutableBidict, bidict
+from cachetools import cached
+from cachetools.keys import hashkey
 from graph_tool import Graph, Vertex, Edge, GraphView
 from graph_tool.search import bfs_search, BFSVisitor, StopSearch
 from graph_tool.spectral import adjacency
 from graph_tool.topology import transitive_closure, all_paths
-from orderedset import OrderedSet
+from orderedset import OrderedSet, FrozenOrderedSet
 
 from neo_grammar_graph.helpers import split_expansion, is_nonterminal, canonical
 from neo_grammar_graph.nodes import (
@@ -1401,46 +1403,26 @@ class NeoGrammarGraph:
                 return self.vertex_to_node[vertex]
 
         if start_nodes is None:
-            start_vertices = [
+            start_vertices = tuple(
                 vertex
                 for vertex in graph.vertices()
                 if isinstance(vertex_to_node(vertex), NonterminalNode)
-            ]
+            )
+
         else:
-            start_vertices = [
+            start_vertices = tuple(
                 node for elem in start_nodes for node in self.vertices(elem)
-            ]
+            )
 
-        result_vertex_paths: OrderedSet[Tuple[Vertex, ...]] = OrderedSet()
-
-        for vertex in start_vertices:
-            result_for_node: Dict[int, OrderedSet[Tuple[Vertex, ...]]] = {
-                1: OrderedSet([(vertex,)])
-            }
-
-            for depth in range(k - 1):
-                result_for_node[depth + 2] = OrderedSet(
-                    [
-                        path + (child,)
-                        for path in result_for_node[depth + 1]
-                        for child in graph.get_out_neighbors(path[-1])
-                        if include_terminals
-                        or not isinstance(vertex_to_node(child), TerminalNode)
-                    ]
-                )
-
-            if up_to:
-                result_vertex_paths.update(
-                    [
-                        path
-                        for depth, paths in result_for_node.items()
-                        if depth % 2
-                        for path in paths
-                    ]
-                )
-            else:
-                assert k in result_for_node
-                result_vertex_paths.update(result_for_node[k])
+        result_vertex_paths = k_paths_in_graph(
+            graph,
+            vertex_to_node,
+            k,
+            start_vertices,
+            up_to,
+            include_terminals,
+            hash(self),
+        )
 
         return OrderedSet(
             [
@@ -1684,228 +1666,6 @@ class NeoGrammarGraph:
         except InvalidTreeException:
             return False
 
-    def k_paths_in_tree(
-        self,
-        tree: ParseTree,
-        k: int,
-        include_potential_paths=True,
-        include_terminals=True,
-    ) -> OrderedSet[Tuple[Node, ...]]:
-        r"""
-        This method computes the grammar k-paths covered by the given
-        :class:`~neo_grammar_graph.type_defs.ParseTree`. The length of
-        the paths is specified by the parameter "k." In the value for
-        k, choice nodes are not included. That is, for k=3, paths of length
-        5 (including two choice nodes) are computed. If :code:`include_potential_paths`
-        is True, then k-paths reachable from open leaves in the tree are included.
-        If :code:`include_terminals` is True, then paths ending in terminal symbols
-        are included.
-
-        Example:
-
-        >>> import string
-        >>> grammar = {
-        ...     "<start>":
-        ...         ["<stmt>"],
-        ...     "<stmt>":
-        ...         ["<assgn> ; <stmt>", "<assgn>"],
-        ...     "<assgn>":
-        ...         ["<var> := <rhs>"],
-        ...     "<rhs>":
-        ...         ["<var>", "<digit>"],
-        ...     "<var>": list(string.ascii_lowercase),
-        ...     "<digit>": list(string.digits)
-        ... }
-        >>> graph = NeoGrammarGraph(grammar)
-
-        The following ParseTree can be derived from the above grammar:
-
-        >>> tree: ParseTree = (
-        ...   '<start>',
-        ...     [('<stmt>',
-        ...       [('<assgn>',
-        ...         [('<var>', [('x', [])]),
-        ...          (' := ', []),
-        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
-        ...        (' ; ', []),
-        ...        ('<stmt>',
-        ...         [('<assgn>',
-        ...           [('<var>', [('y', [])]),
-        ...            (' := ', []),
-        ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
-
-        This is the set of all 3-paths in this tree.
-
-        >>> print(paths_to_str(graph.k_paths_in_tree(tree, 3, include_terminals=True)))
-        <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <assgn> (0)
-        <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), ' ; ' (0)
-        <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <stmt> (1)
-        <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <var> (0)
-        <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), ' := ' (0)
-        <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <rhs> (0)
-        <stmt> (0), <stmt>-choice (0), <stmt> (1), <stmt>-choice (1), <assgn> (1)
-        <assgn> (0), <assgn>-choice (0), <var> (0), <var>-choice (23), 'x' (0)
-        <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
-        <stmt> (1), <stmt>-choice (1), <assgn> (1), <assgn>-choice (0), <var> (0)
-        <stmt> (1), <stmt>-choice (1), <assgn> (1), <assgn>-choice (0), ' := ' (0)
-        <stmt> (1), <stmt>-choice (1), <assgn> (1), <assgn>-choice (0), <rhs> (0)
-        <rhs> (0), <rhs>-choice (1), <digit> (0), <digit>-choice (1), '1' (0)
-        <assgn> (1), <assgn>-choice (0), <var> (0), <var>-choice (24), 'y' (0)
-        <assgn> (1), <assgn>-choice (0), <rhs> (0), <rhs>-choice (0), <var> (1)
-        <rhs> (0), <rhs>-choice (0), <var> (1), <var>-choice (23), 'x' (0)
-
-        Optionally, we can exclude the paths ending in terminal symbols:
-
-        >>> print(paths_to_str(graph.k_paths_in_tree(
-        ...         tree, 3, include_terminals=False)))
-        <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <assgn> (0)
-        <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <stmt> (1)
-        <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <var> (0)
-        <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <rhs> (0)
-        <stmt> (0), <stmt>-choice (0), <stmt> (1), <stmt>-choice (1), <assgn> (1)
-        <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
-        <stmt> (1), <stmt>-choice (1), <assgn> (1), <assgn>-choice (0), <var> (0)
-        <stmt> (1), <stmt>-choice (1), <assgn> (1), <assgn>-choice (0), <rhs> (0)
-        <assgn> (1), <assgn>-choice (0), <rhs> (0), <rhs>-choice (0), <var> (1)
-
-        Let us "open" a tree leave by replacing a subtree with :code:`None`:
-
-        >>> tree: ParseTree = (
-        ...   '<start>',
-        ...     [('<stmt>',
-        ...       [('<assgn>',
-        ...         [('<var>', [('x', [])]),
-        ...          (' := ', []),
-        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
-        ...        (' ; ', []),
-        ...        ('<stmt>',
-        ...         [('<assgn>',
-        ...           [('<var>', [('y', [])]),
-        ...           (' := ', []),
-        ...           ('<rhs>', None)])])])])
-
-        First, let us inspect the "concrete" paths (without terminal symbols) in this
-        cropped tree:
-
-        >>> print(paths_to_str(graph.k_paths_in_tree(
-        ...         tree, 3, include_potential_paths=False, include_terminals=False)))
-        <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <assgn> (0)
-        <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <stmt> (1)
-        <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <var> (0)
-        <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <rhs> (0)
-        <stmt> (0), <stmt>-choice (0), <stmt> (1), <stmt>-choice (1), <assgn> (1)
-        <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
-        <stmt> (1), <stmt>-choice (1), <assgn> (1), <assgn>-choice (0), <var> (0)
-        <stmt> (1), <stmt>-choice (1), <assgn> (1), <assgn>-choice (0), <rhs> (0)
-
-        If we additionally ask for the potential paths, the two paths starting from the
-        :code:`<assgn> (1)` node and passing the open :code:`<rhs> (0)` node are added
-        to the result:
-
-        >>> print(paths_to_str(graph.k_paths_in_tree(
-        ...         tree, 3, include_potential_paths=True, include_terminals=False)))
-        <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <assgn> (0)
-        <start> (0), <start>-choice (0), <stmt> (0), <stmt>-choice (0), <stmt> (1)
-        <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <var> (0)
-        <stmt> (0), <stmt>-choice (0), <assgn> (0), <assgn>-choice (0), <rhs> (0)
-        <stmt> (0), <stmt>-choice (0), <stmt> (1), <stmt>-choice (1), <assgn> (1)
-        <assgn> (0), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
-        <stmt> (1), <stmt>-choice (1), <assgn> (1), <assgn>-choice (0), <var> (0)
-        <stmt> (1), <stmt>-choice (1), <assgn> (1), <assgn>-choice (0), <rhs> (0)
-        <assgn> (1), <assgn>-choice (0), <rhs> (0), <rhs>-choice (0), <var> (1)
-        <assgn> (1), <assgn>-choice (0), <rhs> (0), <rhs>-choice (1), <digit> (0)
-
-        If we take the most "general" tree consisting only of an open root with the
-        start nonterminal, the potential k-paths with terminal symbols are the same
-        as all k-paths in the grammar graph.
-
-        >>> graph.k_paths_in_tree(("<start>", None), 3) == graph.k_paths(3)
-        True
-
-        >>> graph.k_paths_in_tree(("<start>", None), 4) == graph.k_paths(4)
-        True
-
-        :param tree: The :class:`~neo_grammar_graph.type_defs.ParseTree` from which to
-            extract the k-paths.
-        :param k: The length of the paths.
-        :param include_potential_paths: Set to True if you want to include potential
-            paths that might be reachable for open tree leaves.
-        :param include_terminals: Set to True if you want to include terminal symbols
-            in the returned k-paths.
-        :return: The grammar k-paths covered by the given tree.
-        """
-
-        tree_graph = self.parse_tree_to_graph(tree)
-
-        tree_k_paths = self.k_paths(
-            k,
-            graph=tree_graph,
-            up_to=False,
-            include_terminals=include_terminals,
-        )
-
-        if not include_potential_paths:
-            return tree_k_paths
-
-        result = OrderedSet(tree_k_paths)
-
-        # Add to result:
-        #
-        # - All k-paths that start with a nonterminal reachable from a nonterminal
-        #   of some open tree leaf.
-        # - All grammar k-paths for which there is a non-empty suffix of a tree k-path
-        #   ending in a nonterminal that is a prefix of the grammar k-path.
-
-        open_leaf_vertices = [
-            v
-            for v in leaves_in_graph(tree_graph)
-            if isinstance(tree_graph.vp.node[v], NonterminalNode)
-        ]
-
-        open_leaf_nodes = [tree_graph.vp.node[v] for v in open_leaf_vertices]
-
-        grammar_k_paths = self.k_paths(
-            k,
-            up_to=False,
-            include_terminals=include_terminals,
-        )
-
-        for other_path in grammar_k_paths.difference(set(result)):
-            if any(
-                other_path[0] == leaf_node or self.reachable(leaf_node, other_path[0])
-                for leaf_node in open_leaf_nodes
-            ):
-                result.add(other_path)
-
-        tree_paths_to_open_leaves = OrderedSet(
-            [
-                tuple([tree_graph.vp.node[v] for v in path])
-                for open_leaf_vertex in open_leaf_vertices
-                for path in all_paths(
-                    tree_graph, tree_graph.vertex(0), open_leaf_vertex
-                )
-            ]
-        )
-
-        # Add other_path if there is a non-empty suffix of a tree path ending in
-        # a nonterminal that is a prefix of other_path.
-        #
-        # Example:
-        #
-        # - other_path (length 2*k-1):            1234567
-        # - tree_path (length arbitrary): 9999999912345
-        # - Shared pre/postfix: 12345 (for shift of 2)
-        #
-        # `shift` can proceed in steps of 2, since we do not consider paths starting
-        # or ending in choice nodes (every second node is a choice node).
-        for other_path in grammar_k_paths.difference(set(result)):
-            for tree_path in tree_paths_to_open_leaves:
-                for shift in range(1, 2 * k - 1, 2):
-                    if tree_path[-shift:] == other_path[:shift]:
-                        result.add(other_path)
-
-        return result
-
     def save_to_dot(self, file_name: str) -> None:
         """
         Saves the graph as a DOT digraph that can be, e.g., exported to a PNG file
@@ -2046,3 +1806,82 @@ def paths_to_str(
     return path_separator.join(
         map(lambda path: path_to_str(path, separator=node_separator), paths)
     )
+
+
+@cached(
+    cache={},
+    key=lambda graph, vertex_to_node, k, start_vertices, up_to=False, include_terminals=True, grammar_hash=0: hashkey(
+        adjacency(graph).data.tobytes(),
+        k,
+        start_vertices,
+        up_to,
+        include_terminals,
+        grammar_hash,
+    ),
+)
+def k_paths_in_graph(
+    graph: Graph,
+    vertex_to_node: Callable[[Vertex], Node],
+    k: int,
+    start_vertices: Tuple[Vertex, ...] = (),
+    up_to: bool = False,
+    include_terminals: bool = True,
+    grammar_hash: int = 0,
+) -> FrozenOrderedSet[Tuple[Vertex, ...]]:
+    """
+    Computes the k-paths in the given graph, starting at the specified start vertices.
+
+    :param graph: The graph object in which we should compute the k-paths.
+    :param vertex_to_node: A function mapping vertices to nodes.
+    :param k: The length of the k-paths (incl. choice nodes).
+    :param start_vertices: The start vertices. If not provided, we only return paths
+        starting from vertex 0.
+    :param up_to: If True, also paths with lengths smaller than k are returned.
+    :param include_terminals: Paths ending in terminal symbols are returned if, and
+        only if, this parameter is True.
+    :param grammar_hash: This parameter distinguishes graphs originating from different
+        grammars. It is only used for hashing.
+    :return: The k-path vertex sequences in the graph, subject to the specified
+        parameters.
+    """
+
+    if not start_vertices:
+        start_vertices = graph.vertex(0)
+
+    result_vertex_paths: FrozenOrderedSet[Tuple[Vertex, ...]] = FrozenOrderedSet()
+
+    for vertex in start_vertices:
+        result_for_node: Dict[int, OrderedSet[Tuple[Vertex, ...]]] = {
+            1: OrderedSet([(vertex,)])
+        }
+
+        for depth in range(k - 1):
+            result_for_node[depth + 2] = OrderedSet(
+                [
+                    path + (child,)
+                    for path in result_for_node[depth + 1]
+                    for child in graph.get_out_neighbors(path[-1])
+                    if include_terminals
+                    or not isinstance(vertex_to_node(child), TerminalNode)
+                ]
+            )
+
+        if up_to:
+            result_vertex_paths = FrozenOrderedSet(
+                result_vertex_paths
+                | FrozenOrderedSet(
+                    [
+                        path
+                        for depth, paths in result_for_node.items()
+                        if depth % 2
+                        for path in paths
+                    ]
+                )
+            )
+        else:
+            assert k in result_for_node
+            result_vertex_paths = FrozenOrderedSet(
+                result_vertex_paths | result_for_node[k]
+            )
+
+    return result_vertex_paths

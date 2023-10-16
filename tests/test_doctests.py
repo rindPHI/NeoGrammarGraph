@@ -1,12 +1,16 @@
 import doctest
 import unittest
 
-from neo_grammar_graph import gg, helpers, nodes
+from neo_grammar_graph import gg, helpers, nodes, dtree
 
 
 class TestDocstrings(unittest.TestCase):
     def test_gg(self):
         doctest_results = doctest.testmod(m=gg)
+        self.assertFalse(doctest_results.failed)
+
+    def test_dtree(self):
+        doctest_results = doctest.testmod(m=dtree)
         self.assertFalse(doctest_results.failed)
 
     def test_helpers(self):
