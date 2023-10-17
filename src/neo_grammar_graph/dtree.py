@@ -2,15 +2,14 @@ import itertools
 import os
 import pathlib
 import tempfile
-from functools import reduce
+from functools import reduce, partial
 from itertools import zip_longest
 from typing import cast, Tuple, List
 
 import numpy
-from bidict import MutableBidict, bidict
 from graph_tool import Graph, Vertex, VertexPropertyMap, GraphView
 from graph_tool.generation import graph_union
-from graph_tool.search import DFSVisitor, dfs_search
+from graph_tool.search import DFSVisitor, dfs_search, dfs_iterator
 from graph_tool.topology import all_paths
 from orderedset import FrozenOrderedSet
 from returns.functions import tap
@@ -37,23 +36,25 @@ class DTree:
         self,
         grammar_graph: NeoGrammarGraph,
         tree_graph: Graph,
-        vertex_to_node: MutableBidict[Vertex, Tuple[Node, int]],
+        vertex_to_graph_node: VertexPropertyMap,  # Vertex -> Node
+        vertex_to_id: VertexPropertyMap,  # Vertex -> int
         maybe_root: Maybe[Vertex] = Nothing,
     ):
         """
-        TODO
 
         :param grammar_graph:
         :param tree_graph:
-        :param vertex_to_node:
+        :param vertex_to_graph_node:
+        :param vertex_to_id:
         :param maybe_root:
         """
 
         self.grammar_graph = grammar_graph
         self.tree_graph = tree_graph
-        self.vertex_to_node = vertex_to_node
+        self.vertex_to_graph_node = vertex_to_graph_node
+        self.vertex_to_id = vertex_to_id
         self.root = maybe_root.lash(lambda _: Some(tree_graph.vertex(0))).unwrap()
-        assert isinstance(self.vertex_to_node[self.root][0], SymbolicNode)
+        assert isinstance(self.vertex_to_graph_node[self.root], SymbolicNode)
 
     @staticmethod
     def from_parse_tree(
@@ -105,8 +106,11 @@ class DTree:
 
         The root node is always the vertex with identifier 0.
 
-        >>> dtree.vertex_to_node[0]
-        (NonterminalNode(ident=0, value='<start>'), 0)
+        >>> dtree.vertex_to_graph_node[dtree.root]
+        NonterminalNode(ident=0, value='<start>')
+
+        >>> dtree.graph_node()
+        NonterminalNode(ident=0, value='<start>')
 
         When trying to convert an invalid tree, we obtain a Failure:
 
@@ -125,7 +129,8 @@ class DTree:
         tree_graph = Graph()
         tree_graph.vp.label = tree_graph.new_vertex_property("string")
         tree_graph.ep.label = tree_graph.new_edge_property("int")
-        vertex_to_node = bidict()
+        vertex_to_graph_node = tree_graph.new_vertex_property("object")
+        vertex_to_id = tree_graph.new_vertex_property("int")
 
         root = tree_graph.add_vertex()
 
@@ -142,7 +147,8 @@ class DTree:
             choice_node_vertex = tree_graph.add_vertex()
             identifier = DTree.next_id()
             tree_graph.vp.label[choice_node_vertex] = f"{identifier}: {choice_node}"
-            vertex_to_node[choice_node_vertex] = (choice_node, identifier)
+            vertex_to_graph_node[choice_node_vertex] = choice_node
+            vertex_to_id[choice_node_vertex] = identifier
 
             tree_graph.add_edge(v, choice_node_vertex)
 
@@ -160,7 +166,8 @@ class DTree:
 
             identifier = DTree.next_id()
             tree_graph.vp.label[v] = f"{identifier}: {node}"
-            vertex_to_node[v] = (node, identifier)
+            vertex_to_graph_node[v] = node
+            vertex_to_id[v] = identifier
 
             if not children:
                 continue
@@ -196,29 +203,32 @@ class DTree:
 
             maybe_choice_node.map(tap(add_choice_node_and_children))
 
-        return Success(DTree(grammar_graph, tree_graph, vertex_to_node))
+        return Success(
+            DTree(grammar_graph, tree_graph, vertex_to_graph_node, vertex_to_id)
+        )
 
     def value(self) -> str:
         """
         :return: The value (nonterminal or terminal symbol) of the tree's root node.
         """
 
-        return cast(SymbolicNode, self.vertex_to_node[self.root][0]).value
+        return cast(SymbolicNode, self.vertex_to_graph_node[self.root]).value
 
-    def node(self) -> Tuple[Node, int]:
+    def graph_node(self) -> Node:
         """
         TODO
+
         :return:
         """
 
-        return self.vertex_to_node[self.root]
+        return self.vertex_to_graph_node[self.root]
 
     def id(self) -> int:
         """
         :return: The value (nonterminal or terminal symbol) of the tree's root node.
         """
 
-        return self.vertex_to_node[self.root][1]
+        return self.vertex_to_id[self.root]
 
     def children(self) -> "Tuple[DTree, ...]":
         """
@@ -286,7 +296,7 @@ class DTree:
 
         At path (0, 2, 0), we find the second assignment:
 
-        >>> dtree.vertex_to_node[dtree.vertex_at((0, 2, 0))][0].value
+        >>> dtree.vertex_to_graph_node[dtree.vertex_at((0, 2, 0))].value
         '<assgn>'
 
         Let us obtain the subtree at that path:
@@ -335,7 +345,8 @@ class DTree:
         return DTree(
             self.grammar_graph,
             graph_view,
-            self.vertex_to_node,
+            self.vertex_to_graph_node,
+            self.vertex_to_id,
             Some(new_root),
         )
 
@@ -381,7 +392,7 @@ class DTree:
 
         At path (0, 2, 0, 0, 0), we find the vertex corresponding to the identifier y:
 
-        >>> dtree.vertex_to_node[dtree.vertex_at((0, 2, 0, 0, 0))][0]
+        >>> dtree.vertex_to_graph_node[dtree.vertex_at((0, 2, 0, 0, 0))]
         TerminalNode(ident=0, value='y')
 
         :param path: The path of the vertex to find.
@@ -450,7 +461,7 @@ class DTree:
         return tuple(
             self.get_subtree(v)
             for v in leaves_in_graph(self.tree_graph)
-            if isinstance(self.vertex_to_node[v][0], NonterminalNode)
+            if isinstance(self.vertex_to_graph_node[v], NonterminalNode)
         )
 
     def replace_subtree(
@@ -535,27 +546,48 @@ class DTree:
                         └── <var>
                             └── "x"
 
+        We can also replace a subtree with existing children:
+
+        >>> newer_tree = new_tree.replace_subtree(
+        ...     (0, 2, 0, 2), new_subtree
+        ... )
+
+        The lengths are unchanged: During the replacement, no nodes are left dangling.
+
+        >>> len(new_tree) == len(newer_tree)
+        True
+
+        >>> print(newer_tree.to_str_repr())
+        <start>
+        └── <stmt>
+            ├── <assgn>
+            │   ├── <var>
+            │   │   └── "x"
+            │   ├── " := "
+            │   └── <rhs>
+            │       └── <digit>
+            │           └── "3"
+            ├── " ; "
+            └── <stmt>
+                └── <assgn>
+                    ├── <var>
+                    ├── " := "
+                    └── <rhs>
+                        └── <digit>
+                            └── "3"
+
         :param path_or_vertex: The path or vertex whose subtree (starting with itself)
             should be replaced.
         :param new_subtree: The new subtree.
         :return: The updated tree. The original trees are left untouched.
         """
 
-        # I did not find a faster method to propagate the node identities...
-        # Relying on the order of `vertex_to_node` did not work well. We might have
-        # to optimize something here eventually. O(N) for tree replacement is not
-        # acceptable.
-        vtn_1 = self.tree_graph.new_vertex_property("object")
-        for v1 in self.tree_graph.vertices():
-            vtn_1[v1] = self.vertex_to_node[v1]
-
-        vtn_2 = self.tree_graph.new_vertex_property("object")
-        for v2 in new_subtree.tree_graph.vertices():
-            vtn_2[v2] = new_subtree.vertex_to_node[v2]
-
-        vertex = self.arg_to_vertex(path_or_vertex)
+        intersection_vertex = self.arg_to_vertex(path_or_vertex)
+        intersection_vertex_child_id: Maybe[int] = Maybe.from_optional(
+            next(self.tree_graph.iter_out_neighbors(intersection_vertex), None)
+        ).map(lambda v: self.vertex_to_id[v])
         intersection = new_subtree.tree_graph.new_vertex_property("int", val=-1)
-        intersection[new_subtree.root] = int(vertex)
+        intersection[new_subtree.root] = int(intersection_vertex)
 
         union_graph: Graph
         new_props: List[VertexPropertyMap]
@@ -563,7 +595,10 @@ class DTree:
             self.tree_graph,
             new_subtree.tree_graph,
             intersection=intersection,
-            props=[(vtn_1, vtn_2)]
+            props=[
+                (self.vertex_to_graph_node, new_subtree.vertex_to_graph_node),
+                (self.vertex_to_id, new_subtree.vertex_to_id),
+            ]
             + list(
                 zip(
                     self.tree_graph.properties.values(),
@@ -572,21 +607,34 @@ class DTree:
             ),
         )
 
-        union_graph.vp.label, union_graph.ep.label = new_props[1:]
+        (
+            vertex_to_graph_node,
+            vertex_to_id,
+            union_graph.vp.label,
+            union_graph.ep.label,
+        ) = new_props
 
-        vertex_to_node = bidict(
-            {vertex: new_props[0][vertex] for vertex in union_graph.vertices()}
+        # We delete any previous ancestors of the intersection node
+        def delete_node_and_ancestors(graph: Graph, node_id: int) -> None:
+            v = graph.vertex(numpy.where(vertex_to_id.a == numpy.intc(node_id))[0][0])
+            arr = numpy.ndarray.flatten(dfs_iterator(graph, v, array=True))
+            graph.remove_vertex(arr)
+
+        intersection_vertex_child_id.map(
+            tap(partial(delete_node_and_ancestors, union_graph))
         )
 
-        for v1, v2 in union_graph.edges():
-            assert (
-                isinstance(vertex_to_node[v1][0], SymbolicNode)
-                and isinstance(vertex_to_node[v2][0], ChoiceNode)
-                or isinstance(vertex_to_node[v2][0], SymbolicNode)
-                and isinstance(vertex_to_node[v1][0], ChoiceNode)
-            )
+        assert (
+            isinstance(vertex_to_graph_node[v1], SymbolicNode)
+            and isinstance(vertex_to_graph_node[v2], ChoiceNode)
+            or isinstance(vertex_to_graph_node[v2], SymbolicNode)
+            and isinstance(vertex_to_graph_node[v1], ChoiceNode)
+            for v1, v2 in union_graph.edges()
+        )
 
-        return DTree(self.grammar_graph, union_graph, vertex_to_node)
+        return DTree(
+            self.grammar_graph, union_graph, vertex_to_graph_node, vertex_to_id
+        )
 
     def k_paths(
         self,
@@ -732,8 +780,6 @@ class DTree:
         ...     == graph.k_paths(4)
         True
 
-        :param tree: The :class:`~neo_grammar_graph.type_defs.ParseTree` from which to
-            extract the k-paths.
         :param k: The length of the paths.
         :param include_potential_paths: Set to True if you want to include potential
             paths that might be reachable for open tree leaves.
@@ -744,12 +790,12 @@ class DTree:
 
         tree_vertex_k_paths = k_paths_in_graph(
             self.tree_graph,
-            lambda v: self.vertex_to_node[v][0],
+            lambda v: self.vertex_to_graph_node[v],
             2 * k - 1,
             start_vertices=tuple(
                 vertex
                 for vertex in self.tree_graph.vertices()
-                if isinstance(self.vertex_to_node[vertex][0], NonterminalNode)
+                if isinstance(self.vertex_to_graph_node[vertex], NonterminalNode)
             ),
             up_to=False,
             include_terminals=include_terminals,
@@ -758,7 +804,7 @@ class DTree:
 
         tree_k_paths = FrozenOrderedSet(
             [
-                tuple(self.vertex_to_node[v][0] for v in path)
+                tuple(self.vertex_to_graph_node[v] for v in path)
                 for path in tree_vertex_k_paths
             ]
         )
@@ -779,10 +825,10 @@ class DTree:
         open_leaf_vertices = [
             v
             for v in tree_leaves
-            if isinstance(self.vertex_to_node[v][0], NonterminalNode)
+            if isinstance(self.vertex_to_graph_node[v], NonterminalNode)
         ]
 
-        open_leaf_nodes = [self.vertex_to_node[v][0] for v in open_leaf_vertices]
+        open_leaf_nodes = [self.vertex_to_graph_node[v] for v in open_leaf_vertices]
 
         grammar_k_paths = self.grammar_graph.k_paths(
             k,
@@ -800,7 +846,7 @@ class DTree:
 
         tree_paths_to_open_leaves = FrozenOrderedSet(
             [
-                tuple([self.vertex_to_node[v][0] for v in path])
+                tuple([self.vertex_to_graph_node[v] for v in path])
                 for open_leaf_vertex in open_leaf_vertices
                 for path in all_paths(
                     self.tree_graph, self.tree_graph.vertex(0), open_leaf_vertex
@@ -994,7 +1040,7 @@ class DTree:
 
         result = (
             self.value()
-            if isinstance(self.node()[0], NonterminalNode)
+            if isinstance(self.graph_node(), NonterminalNode)
             else f'"{self.value()}"'
         )
 
