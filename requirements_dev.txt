@@ -1,6 +1,7 @@
 bidict>=0.22.1
 black>=22.8.0
 build>=0.10.0
+cachetools>=5.3.1
 flake8>=5.0.4
 numpy>=1.24.2
 proxyorderedset>=0.3.3
