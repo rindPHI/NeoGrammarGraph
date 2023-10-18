@@ -299,16 +299,16 @@ class DTree:
                     └── 22: <rhs>
                         └── 26: <var>
                             └── 28: "x"
-                            
+
         The identifiers for all nodes in the tree, including choice nodes, range from
         0 to 28:
 
         >>> print(dtree.ids())
         {0, 1, 2, 3, 4, 6, 7, 5, 9, 11, 12, 8, 14, 10, 16, 13, 17, 15, 19, 21, 22, 18, 24, 20, 25, 23, 26, 27, 28}
-        
+
         If we ask for the identifiers in the subtree corresponding to the last
         assignment, we obtain the expected, smaller set:
-        
+
         >>> print(dtree.get_subtree((0, 2)).ids())
         {7, 8, 14, 15, 19, 21, 22, 20, 25, 23, 26, 27, 28}
 
