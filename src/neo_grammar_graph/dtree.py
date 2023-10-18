@@ -252,6 +252,9 @@ class DTree:
         >>> str(dtree)
         'x := <rhs> ; <var> := x'
 
+        >>> str(dtree.get_subtree((0, 0)))
+        'x := <rhs>'
+
         :return: A string representation the leaves of this tree.
         """
 
@@ -439,12 +442,12 @@ class DTree:
         The root node has one child:
 
         >>> from neo_grammar_graph.helpers import deep_str
-        >>> print(deep_str(dtree.children()))
-        (DTree(2: <stmt> (0)),)
+        >>> print(list(map(str, dtree.children())))
+        ['x := 1 ; y := x']
 
         This node, in turn, has three children:
-        >>> print(deep_str(dtree.get_subtree((0,)).children()))
-        (DTree(4: <assgn> (0)), DTree(6: ' ; ' (0)), DTree(7: <stmt> (1)))
+        >>> print(list(map(str, dtree.get_subtree((0,)).children())))
+        ['x := 1', ' ; ', 'y := x']
 
         :return: All children of this tree's root.
         """

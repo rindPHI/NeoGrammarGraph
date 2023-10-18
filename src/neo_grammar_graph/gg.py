@@ -1717,12 +1717,20 @@ class NeoGrammarGraph:
         self.graph.save(file_name)
 
 
-def leaves_in_graph(graph: Graph, as_ndarray=False) -> Tuple[Vertex, ...] | np.ndarray:
+def leaves_in_graph(
+    graph: Graph, as_ndarray=False, numpy_type=np.uint64
+) -> Tuple[Vertex, ...] | np.ndarray:
     """
-    This function computes the leaves in a graph using matrix multiplication. It
-    returns the indices of all graph leaves.
+    This function computes the leaves in a graph using matrix multiplication.
+    If as_ndarray is False, it returns a tuple of Vertex elements for all graph leaves.
+    Otherwise, it returns an ndarray of elements of type :code:`numpy_type` representing
+    the vertex indices.
 
     :param graph: The graph to find leaves in.
+    :param as_ndarray: If True, a numpy ndarray is returned instead of a tuple of
+        Vertex objects.
+    :param numpy_type: The numeric type the elements of a returned numpy ndarray
+        should be cast to.
     :return: The leaf indices.
     """
 
@@ -1732,10 +1740,15 @@ def leaves_in_graph(graph: Graph, as_ndarray=False) -> Tuple[Vertex, ...] | np.n
 
     if as_ndarray:
         return np.asarray(
-            tuple(i for i, elem in enumerate(prod) if elem == [0]), dtype=np.uint64
+            tuple(
+                int(graph.vertex(i, use_index=False))
+                for i, elem in enumerate(prod)
+                if elem == [0]
+            ),
+            dtype=np.uint64,
         )
-    else:
-        return tuple(graph.vertex(i) for i, elem in enumerate(prod) if elem == [0])
+
+    return tuple(graph.vertex(i) for i, elem in enumerate(prod) if elem == [0])
 
 
 class InvalidTreeException(Exception):
