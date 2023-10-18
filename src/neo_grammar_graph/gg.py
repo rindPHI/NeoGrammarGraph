@@ -1748,7 +1748,9 @@ def leaves_in_graph(
             dtype=np.uint64,
         )
 
-    return tuple(graph.vertex(i) for i, elem in enumerate(prod) if elem == [0])
+    return tuple(
+        graph.vertex(i, use_index=False) for i, elem in enumerate(prod) if elem == [0]
+    )
 
 
 class InvalidTreeException(Exception):

@@ -4,7 +4,7 @@ import pathlib
 import tempfile
 from functools import reduce, partial
 from itertools import zip_longest
-from typing import cast, Tuple, List
+from typing import cast, Tuple, List, Iterator
 
 import numpy as np
 from graph_tool import Graph, Vertex, VertexPropertyMap, GraphView
@@ -19,7 +19,8 @@ from returns.result import Success, Failure, Result
 
 from neo_grammar_graph import NeoGrammarGraph, InvalidTreeException
 from neo_grammar_graph.gg import leaves_in_graph, k_paths_in_graph
-from neo_grammar_graph.helpers import is_nonterminal
+from neo_grammar_graph.helpers import deep_str  # noqa
+from neo_grammar_graph.helpers import is_nonterminal, star
 from neo_grammar_graph.nodes import ChoiceNode, NonterminalNode, Node, SymbolicNode
 from neo_grammar_graph.type_defs import ParseTree, Path
 
@@ -461,6 +462,88 @@ class DTree:
             .value_or([])
         )
 
+    def expansion_alternatives(
+        self, node: "Vertex | DTree"
+    ) -> Tuple[Tuple[ChoiceNode, Tuple[SymbolicNode, ...]], ...]:
+        """
+        This method computes the expansion alternatives at the specified node.
+        The returned sequence can only be non-empty if the node is a leaf labeled
+        with a nonterminal symbol. If this is the case, the sequence contains tuples
+        of the choice nodes that can be taken and the sequences of direct children
+        of these choice nodes, expressed as grammar graph nodes.
+
+        Example
+        -------
+
+        We consider the (incomplete/open) string :code:`x := <rhs> ; <stmt>` in
+        our assignment language:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> parse_tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', None)]),
+        ...        (' ; ', []),
+        ...        ('<stmt>', None)])])
+        >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
+
+        We first obtain the open leaf nodes from the tree.
+
+        >>> open_leaf_1, open_leaf_2 = dtree.open_leaves()
+
+        We have two options for expanding the open :code:`<stmt>` node:
+
+        >>> from neo_grammar_graph.helpers import deep_str
+        >>> deep_str(dtree.expansion_alternatives(open_leaf_1))
+        "((<stmt>-choice (0), (<assgn> (0), ' ; ' (0), <stmt> (1))), (<stmt>-choice (1), (<assgn> (1),)))"
+
+        Similarly for the :code:`<rhs>` node:
+
+        >>> deep_str(dtree.expansion_alternatives(open_leaf_2))
+        '((<rhs>-choice (0), (<var> (1),)), (<rhs>-choice (1), (<digit> (0),)))'
+
+        The root node has already been expanded; there are no options here:
+
+        >>> dtree.expansion_alternatives(dtree.root)
+        ()
+
+        :param node: The vertex or sub tree to expand.
+        :return: A sequence of expansion options.
+        """  # noqa: E501
+
+        if isinstance(node, Vertex):
+            vertex, grammar_node = node, self.vertex_to_graph_node[node]
+        else:
+            assert isinstance(node, DTree)
+            vertex, grammar_node = node.root, node.graph_node()
+
+        if not isinstance(
+            grammar_node, NonterminalNode
+        ) or self.tree_graph.get_out_neighbors(vertex):
+            return ()
+
+        return tuple(
+            (choice_node, tuple(self.grammar_graph.children(choice_node)))
+            for choice_node in self.grammar_graph.children(grammar_node)
+        )
+
     def __len__(self) -> int:
         return self.tree_graph.num_vertices()
 
@@ -818,6 +901,65 @@ class DTree:
             if isinstance(self.vertex_to_graph_node[v], NonterminalNode)
         )
 
+    def dfs_iterator(self) -> Iterator["Tuple[Vertex, Node, int]"]:
+        """
+        TODO
+
+        Example
+        -------
+
+        We consider the string :code:`x := 1 ; y := x` in our assignment language:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> parse_tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
+        ...        (' ; ', []),
+        ...        ('<stmt>',
+        ...         [('<assgn>',
+        ...           [('<var>', [('y', [])]),
+        ...            (' := ', []),
+        ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
+
+        >>> DTree._DTree__next_id = 5
+        >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
+        >>> deep_str(list(itertools.islice(dtree.dfs_iterator(), 5)))
+        '[(0, <start> (0), 5), (1, <start>-choice (0), 6), (2, <stmt> (0), 7), (3, <stmt>-choice (0), 8), (4, <assgn> (0), 9)]'
+
+        :return: TODO
+        """  # noqa: E501
+
+        return map(
+            star(
+                lambda v1, v2: (
+                    v2,
+                    self.vertex_to_graph_node[v2],
+                    self.vertex_to_id[v2],
+                )
+            ),
+            itertools.chain(
+                [(self.root, self.root)], dfs_iterator(self.tree_graph, self.root)
+            ),
+        )
+
     def replace_subtree(
         self, path_or_vertex: Path | Vertex | np.int64, new_subtree: "DTree"
     ) -> "DTree":
@@ -989,6 +1131,155 @@ class DTree:
 
         return DTree(
             self.grammar_graph, union_graph, vertex_to_graph_node, vertex_to_id
+        )
+
+    def expand(self, node: "Vertex | DTree", alternative: int) -> "DTree":
+        """
+        This method expands the tree at the given node, using the expansion alternative
+        with the specified index. Use
+        :meth:`~neo_grammar_graph.dtree.DTree.expansion_alternatives` to obtain the
+        available expansion alternatives.
+
+        Example
+        -------
+
+        We consider the (incomplete/open) string :code:`x := <rhs> ; <stmt>` in
+        our assignment language:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> parse_tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', None)]),
+        ...        (' ; ', []),
+        ...        ('<stmt>', None)])])
+
+        >>> DTree._DTree__next_id = 0
+        >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
+
+        We have the option to expand two leaves:
+
+        >>> open_leaf_1, open_leaf_2 = dtree.open_leaves()
+
+        For each of them, we have two alternatives. For example, we can expand the
+        open :code:`<stmt>` node to a single assignment or an assignment followed by
+        another statement:
+
+        >>> print(dtree.expand(open_leaf_1, 0).to_str_repr())
+        0: <start>
+        └── 2: <stmt>
+            ├── 4: <assgn>
+            │   ├── 8: <var>
+            │   │   └── 12: "x"
+            │   ├── 10: " := "
+            │   └── 11: <rhs>
+            ├── 6: " ; "
+            └── 7: <stmt>
+                ├── 14: <assgn>
+                ├── 15: " ; "
+                └── 16: <stmt>
+
+        >>> print(dtree.expand(open_leaf_1, 1).to_str_repr())
+        0: <start>
+        └── 2: <stmt>
+            ├── 4: <assgn>
+            │   ├── 8: <var>
+            │   │   └── 12: "x"
+            │   ├── 10: " := "
+            │   └── 11: <rhs>
+            ├── 6: " ; "
+            └── 7: <stmt>
+                └── 18: <assgn>
+
+        We can expand these trees again, for instance by expanding the open
+        :code:`<rhs>` leaf:
+
+        >>> print(dtree.expand(open_leaf_1, 1).expand(open_leaf_2, 0).to_str_repr())
+        0: <start>
+        └── 2: <stmt>
+            ├── 4: <assgn>
+            │   ├── 8: <var>
+            │   │   └── 12: "x"
+            │   ├── 10: " := "
+            │   └── 11: <rhs>
+            │       └── 22: <var>
+            ├── 6: " ; "
+            └── 7: <stmt>
+                └── 20: <assgn>
+
+        :param node: The node to expand.
+        :param alternative: The expansion alternative.
+        :return: The expanded tree, which shares no objects with the original tree.
+        """
+
+        if isinstance(node, Vertex):
+            vertex = node
+        else:
+            assert isinstance(node, DTree)
+            vertex = node.root
+
+        new_tree_graph = self.tree_graph.copy()
+
+        # TODO: Is there a quicker way to copy the vertex properties without losing
+        #       the reference to the new graph?
+        new_vertex_to_graph_node = new_tree_graph.new_vertex_property("object")
+        for v in self.tree_graph.vertices():
+            new_vertex_to_graph_node[
+                new_tree_graph.vertex(int(v))
+            ] = self.vertex_to_graph_node[v]
+
+        new_vertex_to_id = new_tree_graph.new_vertex_property("int")
+        for v in self.tree_graph.vertices():
+            new_vertex_to_id[new_tree_graph.vertex(int(v))] = self.vertex_to_id[v]
+
+        choice_node, new_leaves = self.expansion_alternatives(vertex)[alternative]
+
+        choice_node_vertex = new_tree_graph.add_vertex()
+
+        new_vertex_to_graph_node[choice_node_vertex] = choice_node
+        identifier = DTree.next_id()
+        new_vertex_to_id[choice_node_vertex] = identifier
+        new_tree_graph.vp.label[choice_node_vertex] = f"{identifier}: {choice_node}"
+
+        choice_node_edge = new_tree_graph.add_edge(vertex, choice_node_vertex)
+        new_tree_graph.ep.label[choice_node_edge] = 0
+
+        for idx, new_leaf in enumerate(new_leaves):
+            new_leaf_vertex = new_tree_graph.add_vertex()
+
+            new_vertex_to_graph_node[new_leaf_vertex] = new_leaf
+            identifier = DTree.next_id()
+            new_vertex_to_id[new_leaf_vertex] = identifier
+            new_tree_graph.vp.label[new_leaf_vertex] = f"{identifier}: {new_leaf}"
+
+            new_leaf_edge = new_tree_graph.add_edge(choice_node_vertex, new_leaf_vertex)
+            new_tree_graph.ep.label[new_leaf_edge] = idx
+
+        new_root = new_tree_graph.vertex(int(self.root))
+
+        return DTree(
+            self.grammar_graph,
+            new_tree_graph,
+            new_vertex_to_graph_node,
+            new_vertex_to_id,
+            Some(new_root),
         )
 
     def k_paths(

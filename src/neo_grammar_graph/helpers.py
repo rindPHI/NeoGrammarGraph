@@ -1,5 +1,5 @@
 import re
-from typing import List, Any
+from typing import List, Any, Callable, Sequence, TypeVar
 
 import returns
 from frozendict import frozendict
@@ -8,6 +8,8 @@ from returns.maybe import Maybe, Some
 from returns.result import Result, Success, Failure
 
 from neo_grammar_graph.type_defs import Grammar, CanonicalGrammar
+
+T = TypeVar("T")
 
 RE_NONTERMINAL = re.compile(r"(<[^<> ]*>)")
 
@@ -151,6 +153,10 @@ def canonical(grammar: Grammar) -> CanonicalGrammar:
         k: [split_expansion(expression) for expression in alternatives]
         for k, alternatives in grammar.items()
     }
+
+
+def star(f: Callable[[[Any, ...]], T]) -> Callable[[Sequence[Any]], T]:
+    return lambda x: f(*x)
 
 
 def deep_str(obj: Any) -> str:
