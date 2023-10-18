@@ -518,6 +518,7 @@ class DTree:
 
         We convert it to a graph-based derivation tree.
 
+        >>> DTree._DTree__next_id = 0
         >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
 
         At path (0, 2, 0), we find the second assignment:
@@ -529,13 +530,13 @@ class DTree:
 
         >>> subtree = dtree.get_subtree((0, 2, 0))
         >>> print(subtree.to_str_repr())
-        <assgn>
-        ├── <var>
-        │   └── "y"
-        ├── " := "
-        └── <rhs>
-            └── <var>
-                └── "x"
+        14: <assgn>
+        ├── 19: <var>
+        │   └── 25: "y"
+        ├── 21: " := "
+        └── 22: <rhs>
+            └── 26: <var>
+                └── 28: "x"
 
         The original derivation tree contains 29 vertices (including choice nodes):
 
@@ -803,6 +804,7 @@ class DTree:
         ...            (' := ', []),
         ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
 
+        >>> DTree._DTree__next_id = 0
         >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
 
         In this tree, we want to replace the open :code:`<rhs>` leaf by a concrete
@@ -823,23 +825,23 @@ class DTree:
         The resulting tree looks as follows:
 
         >>> print(new_tree.to_str_repr())
-        <start>
-        └── <stmt>
-            ├── <assgn>
-            │   ├── <var>
-            │   │   └── "x"
-            │   ├── " := "
-            │   └── <rhs>
-            │       └── <digit>
-            │           └── "3"
-            ├── " ; "
-            └── <stmt>
-                └── <assgn>
-                    ├── <var>
-                    ├── " := "
-                    └── <rhs>
-                        └── <var>
-                            └── "x"
+        0: <start>
+        └── 2: <stmt>
+            ├── 4: <assgn>
+            │   ├── 9: <var>
+            │   │   └── 15: "x"
+            │   ├── 11: " := "
+            │   └── 23: <rhs>
+            │       └── 25: <digit>
+            │           └── 27: "3"
+            ├── 6: " ; "
+            └── 7: <stmt>
+                └── 13: <assgn>
+                    ├── 16: <var>
+                    ├── 17: " := "
+                    └── 18: <rhs>
+                        └── 20: <var>
+                            └── 22: "x"
 
         We can also replace a subtree with existing children:
 
@@ -853,23 +855,23 @@ class DTree:
         True
 
         >>> print(newer_tree.to_str_repr())
-        <start>
-        └── <stmt>
-            ├── <assgn>
-            │   ├── <var>
-            │   │   └── "x"
-            │   ├── " := "
-            │   └── <rhs>
-            │       └── <digit>
-            │           └── "3"
-            ├── " ; "
-            └── <stmt>
-                └── <assgn>
-                    ├── <var>
-                    ├── " := "
-                    └── <rhs>
-                        └── <digit>
-                            └── "3"
+        0: <start>
+        └── 2: <stmt>
+            ├── 4: <assgn>
+            │   ├── 9: <var>
+            │   │   └── 15: "x"
+            │   ├── 11: " := "
+            │   └── 23: <rhs>
+            │       └── 25: <digit>
+            │           └── 27: "3"
+            ├── 6: " ; "
+            └── 7: <stmt>
+                └── 13: <assgn>
+                    ├── 16: <var>
+                    ├── 17: " := "
+                    └── 23: <rhs>
+                        └── 25: <digit>
+                            └── 27: "3"
 
         :param path_or_vertex: The path or vertex whose subtree (starting with itself)
             should be replaced.
@@ -1377,27 +1379,29 @@ class DTree:
 
         The string representation looks as follows:
 
+        >>> DTree._DTree__next_id = 0
         >>> print(DTree.from_parse_tree(parse_tree, graph).unwrap().to_str_repr())
-        <start>
-        └── <stmt>
-            ├── <assgn>
-            │   ├── <var>
-            │   │   └── "x"
-            │   ├── " := "
-            │   └── <rhs>
-            │       └── <digit>
-            │           └── "1"
-            ├── " ; "
-            └── <stmt>
-                └── <assgn>
-                    ├── <var>
-                    │   └── "y"
-                    ├── " := "
-                    └── <rhs>
-                        └── <var>
-                            └── "x"
+        0: <start>
+        └── 2: <stmt>
+            ├── 4: <assgn>
+            │   ├── 9: <var>
+            │   │   └── 16: "x"
+            │   ├── 11: " := "
+            │   └── 12: <rhs>
+            │       └── 17: <digit>
+            │           └── 24: "1"
+            ├── 6: " ; "
+            └── 7: <stmt>
+                └── 14: <assgn>
+                    ├── 19: <var>
+                    │   └── 25: "y"
+                    ├── 21: " := "
+                    └── 22: <rhs>
+                        └── 26: <var>
+                            └── 28: "x"
 
-        :return:
+        :return: A textual representation of the hierarchical structure of the complete
+            tree, including grammar symbols and tree node identifiers.
         """
 
         result = (
