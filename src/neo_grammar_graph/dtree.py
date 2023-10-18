@@ -6,7 +6,7 @@ from functools import reduce, partial
 from itertools import zip_longest
 from typing import cast, Tuple, List
 
-import numpy
+import numpy as np
 from graph_tool import Graph, Vertex, VertexPropertyMap, GraphView
 from graph_tool.generation import graph_union
 from graph_tool.search import DFSVisitor, dfs_search, dfs_iterator
@@ -209,15 +209,72 @@ class DTree:
 
     def __str__(self):
         """
-        This method returns a brief identifier of this tree's root. For a more complete
-        string representation of the whole tree, consider
+        This method returns a string representation of the leaves in this tree.
+        For a more complete representation of the whole tree, consider
         :meth:`~neo_grammar_graph.dtree.DTree.to_str_repr`.
 
-        :return: A brief string representation of this tree including the root's
-            identifier and grammar graph node.
+        Example
+        -------
+
+        We consider the (incomplete/open) string :code:`x := <rhs> ; <var> := x` in
+        our assignment language:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> parse_tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', None)]),
+        ...        (' ; ', []),
+        ...        ('<stmt>',
+        ...         [('<assgn>',
+        ...           [('<var>', None),
+        ...            (' := ', []),
+        ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
+
+        >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
+        >>> str(dtree)
+        'x := <rhs> ; <var> := x'
+
+        :return: A string representation the leaves of this tree.
         """
 
-        return f"DTree({self.id()}: {self.graph_node()})"
+        if not self.children():
+            assert isinstance(self.graph_node(), SymbolicNode)
+            return cast(SymbolicNode, self.graph_node()).value
+
+        compressed_dfs_traversal_result = np.ndarray.flatten(
+            np.compress(
+                [False, True],
+                dfs_iterator(self.tree_graph, self.root, array=True),
+                axis=1,
+            )
+        )
+
+        leaves = leaves_in_graph(self.tree_graph, as_ndarray=True)
+        condition = np.in1d(compressed_dfs_traversal_result, leaves)
+
+        leaves_in_order = np.extract(condition, compressed_dfs_traversal_result)
+
+        return "".join(
+            map(lambda v: self.vertex_to_graph_node[v].value, leaves_in_order)
+        )
 
     def value(self) -> str:
         """
@@ -474,7 +531,7 @@ class DTree:
 
         return len(longest_path)
 
-    def get_subtree(self, path_or_new_root: Path | Vertex | numpy.int64) -> "DTree":
+    def get_subtree(self, path_or_new_root: Path | Vertex | np.int64) -> "DTree":
         """
         This method computes the subtree at the specified path or vertex. The underlying
         graph-tool tree is masked by a view; no nodes or edges are removed.
@@ -691,15 +748,13 @@ class DTree:
         └── 26: <var>
             └── 28: "x"
 
-        :param node_id:
-        :return:
+        :param node_id: The ID of the node to find.
+        :return: An optional Vertex object corresponding to the requested node.
         """
 
         return Maybe.from_optional(
             next(
-                iter(
-                    numpy.where(self.vertex_to_id.get_array() == numpy.intc(node_id))[0]
-                ),
+                iter(np.where(self.vertex_to_id.get_array() == np.intc(node_id))[0]),
                 None,
             )
         ).map(self.tree_graph.vertex)
@@ -761,7 +816,7 @@ class DTree:
         )
 
     def replace_subtree(
-        self, path_or_vertex: Path | Vertex | numpy.int64, new_subtree: "DTree"
+        self, path_or_vertex: Path | Vertex | np.int64, new_subtree: "DTree"
     ) -> "DTree":
         """
         Replaces the subtree at the given position with the new subtree.
@@ -913,8 +968,8 @@ class DTree:
 
         # We delete any previous ancestors of the intersection node
         def delete_node_and_ancestors(graph: Graph, node_id: int) -> None:
-            v = graph.vertex(numpy.where(vertex_to_id.a == numpy.intc(node_id))[0][0])
-            arr = numpy.ndarray.flatten(dfs_iterator(graph, v, array=True))
+            v = graph.vertex(np.where(vertex_to_id.a == np.intc(node_id))[0][0])
+            arr = np.ndarray.flatten(dfs_iterator(graph, v, array=True))
             graph.remove_vertex(arr)
 
         intersection_vertex_child_id.map(
@@ -1318,11 +1373,11 @@ class DTree:
             self.save_to_dot(tmp.name)
             return pathlib.Path(tmp.name).read_text().strip()
 
-    def arg_to_vertex(self, path_or_new_root: Vertex | numpy.int64 | Path) -> Vertex:
+    def arg_to_vertex(self, path_or_new_root: Vertex | np.int64 | Path) -> Vertex:
         """
         Converts the given argument to a graph-tool vertex.
 
-        :param path_or_new_root: Either a vertex (as an object or numpy int) or a path
+        :param path_or_new_root: Either a vertex (as an object or np int) or a path
             to a vertex.
         :return: The corresponding :class:`~graph_tool.Vertex` object.
         """
@@ -1332,7 +1387,7 @@ class DTree:
             if isinstance(path_or_new_root, Vertex)
             else (
                 self.tree_graph.vertex(path_or_new_root)
-                if isinstance(path_or_new_root, numpy.int64)
+                if isinstance(path_or_new_root, np.int64)
                 or isinstance(path_or_new_root, int)
                 else self.vertex_at(path_or_new_root)
             )

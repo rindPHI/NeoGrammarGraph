@@ -19,7 +19,7 @@ import os.path
 from functools import cache
 from typing import Dict, List, Callable, Optional, Tuple, Any, cast, Sequence
 
-import numpy
+import numpy as np
 from bidict import MutableBidict, bidict
 from cachetools import cached
 from cachetools.keys import hashkey
@@ -1717,7 +1717,7 @@ class NeoGrammarGraph:
         self.graph.save(file_name)
 
 
-def leaves_in_graph(graph: Graph) -> Tuple[Vertex, ...]:
+def leaves_in_graph(graph: Graph, as_ndarray=False) -> Tuple[Vertex, ...] | np.ndarray:
     """
     This function computes the leaves in a graph using matrix multiplication. It
     returns the indices of all graph leaves.
@@ -1727,9 +1727,15 @@ def leaves_in_graph(graph: Graph) -> Tuple[Vertex, ...]:
     """
 
     matrix = adjacency(graph)
-    v = numpy.array([1 for _ in range(numpy.shape(matrix)[0])])
-    prod = numpy.matmul(v, matrix.toarray())
-    return tuple(graph.vertex(i) for i, elem in enumerate(prod) if elem == [0])
+    v = np.array([1 for _ in range(np.shape(matrix)[0])])
+    prod = np.matmul(v, matrix.toarray())
+
+    if as_ndarray:
+        return np.asarray(
+            tuple(i for i, elem in enumerate(prod) if elem == [0]), dtype=np.uint64
+        )
+    else:
+        return tuple(graph.vertex(i) for i, elem in enumerate(prod) if elem == [0])
 
 
 class InvalidTreeException(Exception):
