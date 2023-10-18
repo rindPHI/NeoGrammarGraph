@@ -10,7 +10,7 @@ import numpy
 from graph_tool import Graph, Vertex, VertexPropertyMap, GraphView
 from graph_tool.generation import graph_union
 from graph_tool.search import DFSVisitor, dfs_search, dfs_iterator
-from graph_tool.topology import all_paths
+from graph_tool.topology import all_paths, shortest_path
 from orderedset import FrozenOrderedSet
 from returns.functions import tap
 from returns.maybe import Maybe, Some, Nothing
@@ -207,6 +207,18 @@ class DTree:
             DTree(grammar_graph, tree_graph, vertex_to_graph_node, vertex_to_id)
         )
 
+    def __str__(self):
+        """
+        This method returns a brief identifier of this tree's root. For a more complete
+        string representation of the whole tree, consider
+        :meth:`~neo_grammar_graph.dtree.DTree.to_str_repr`.
+
+        :return: A brief string representation of this tree including the root's
+            identifier and grammar graph node.
+        """
+
+        return f"DTree({self.id()}: {self.graph_node()})"
+
     def value(self) -> str:
         """
         :return: The value (nonterminal or terminal symbol) of the tree's root node.
@@ -216,24 +228,168 @@ class DTree:
 
     def graph_node(self) -> Node:
         """
-        TODO
-
-        :return:
+        :return: The grammar graph node the root of this tree is labeled with.
         """
 
         return self.vertex_to_graph_node[self.root]
 
     def id(self) -> int:
         """
-        :return: The value (nonterminal or terminal symbol) of the tree's root node.
+        :return: The numeric identifier of the tree's root node.
         """
 
         return self.vertex_to_id[self.root]
 
+    def ids(self) -> FrozenOrderedSet[int]:
+        """
+        This method computes the identifiers of all nodes in this tree.
+
+        Example
+        -------
+
+        We consider the string :code:`x := 1 ; y := x` in our assignment language:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> parse_tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
+        ...        (' ; ', []),
+        ...        ('<stmt>',
+        ...         [('<assgn>',
+        ...           [('<var>', [('y', [])]),
+        ...            (' := ', []),
+        ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
+
+        >>> DTree._DTree__next_id = 0
+        >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
+        >>> print(dtree.to_str_repr())
+        0: <start>
+        └── 2: <stmt>
+            ├── 4: <assgn>
+            │   ├── 9: <var>
+            │   │   └── 16: "x"
+            │   ├── 11: " := "
+            │   └── 12: <rhs>
+            │       └── 17: <digit>
+            │           └── 24: "1"
+            ├── 6: " ; "
+            └── 7: <stmt>
+                └── 14: <assgn>
+                    ├── 19: <var>
+                    │   └── 25: "y"
+                    ├── 21: " := "
+                    └── 22: <rhs>
+                        └── 26: <var>
+                            └── 28: "x"
+                            
+        The identifiers for all nodes in the tree, including choice nodes, range from
+        0 to 28:
+
+        >>> print(dtree.ids())
+        {0, 1, 2, 3, 4, 6, 7, 5, 9, 11, 12, 8, 14, 10, 16, 13, 17, 15, 19, 21, 22, 18, 24, 20, 25, 23, 26, 27, 28}
+        
+        If we ask for the identifiers in the subtree corresponding to the last
+        assignment, we obtain the expected, smaller set:
+        
+        >>> print(dtree.get_subtree((0, 2)).ids())
+        {7, 8, 14, 15, 19, 21, 22, 20, 25, 23, 26, 27, 28}
+
+        :return: The identifiers of all subtrees.
+        """  # noqa: E501
+
+        return FrozenOrderedSet(
+            map(lambda v: self.vertex_to_id[v], self.tree_graph.vertices())
+        )
+
     def children(self) -> "Tuple[DTree, ...]":
         """
-        TODO
-        :return:
+        This method returns all children of the root node of this tree.
+
+        Example
+        -------
+
+        We consider the string :code:`x := 1 ; y := x` in our assignment language:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> parse_tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
+        ...        (' ; ', []),
+        ...        ('<stmt>',
+        ...         [('<assgn>',
+        ...           [('<var>', [('y', [])]),
+        ...            (' := ', []),
+        ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
+
+        >>> DTree._DTree__next_id = 0
+        >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
+        >>> print(dtree.to_str_repr())
+        0: <start>
+        └── 2: <stmt>
+            ├── 4: <assgn>
+            │   ├── 9: <var>
+            │   │   └── 16: "x"
+            │   ├── 11: " := "
+            │   └── 12: <rhs>
+            │       └── 17: <digit>
+            │           └── 24: "1"
+            ├── 6: " ; "
+            └── 7: <stmt>
+                └── 14: <assgn>
+                    ├── 19: <var>
+                    │   └── 25: "y"
+                    ├── 21: " := "
+                    └── 22: <rhs>
+                        └── 26: <var>
+                            └── 28: "x"
+
+        The root node has one child:
+
+        >>> from neo_grammar_graph.helpers import deep_str
+        >>> print(deep_str(dtree.children()))
+        (DTree(2: <stmt> (0)),)
+
+        This node, in turn, has three children:
+        >>> print(deep_str(dtree.get_subtree((0,)).children()))
+        (DTree(4: <assgn> (0)), DTree(6: ' ; ' (0)), DTree(7: <stmt> (1)))
+
+        :return: All children of this tree's root.
         """
 
         return tuple(
@@ -247,6 +403,76 @@ class DTree:
 
     def __len__(self) -> int:
         return self.tree_graph.num_vertices()
+
+    def depth(self) -> int:
+        """
+        This method computes the depth of the tree, that is, the length of the longest
+        path from the root to any leaf, including choice nodes.
+
+        Example
+        -------
+
+        We consider the string :code:`x := 1 ; y := x` in our assignment language:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> parse_tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
+        ...        (' ; ', []),
+        ...        ('<stmt>',
+        ...         [('<assgn>',
+        ...           [('<var>', [('y', [])]),
+        ...            (' := ', []),
+        ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
+        >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
+
+        The depth of that tree (including choice nodes) is 13 (7 symbolic and 6
+        intermediate choice nodes).
+
+        >>> dtree.depth()
+        13
+
+        :return: The depth of the tree, including choice nodes.
+        """
+
+        source = self.root
+        targets = leaves_in_graph(self.tree_graph)
+        weights = self.tree_graph.new_edge_property("int", val=-1)
+
+        longest_path = max(
+            [
+                shortest_path(
+                    self.tree_graph,
+                    source,
+                    target,
+                    weights=weights,
+                    negative_weights=True,
+                    dag=True,
+                )[0]
+                for target in targets
+            ],
+            key=len,
+        )
+
+        return len(longest_path)
 
     def get_subtree(self, path_or_new_root: Path | Vertex | numpy.int64) -> "DTree":
         """
@@ -302,8 +528,14 @@ class DTree:
         Let us obtain the subtree at that path:
 
         >>> subtree = dtree.get_subtree((0, 2, 0))
-        >>> subtree.value()
-        '<assgn>'
+        >>> print(subtree.to_str_repr())
+        <assgn>
+        ├── <var>
+        │   └── "y"
+        ├── " := "
+        └── <rhs>
+            └── <var>
+                └── "x"
 
         The original derivation tree contains 29 vertices (including choice nodes):
 
@@ -315,12 +547,7 @@ class DTree:
         >>> len(subtree)
         11
 
-        The new subtree has three children:
-
-        >>> [c.value() for c in subtree.children()]
-        ['<var>', ' := ', '<rhs>']
-
-        We also can ask for the children of the first child:
+        We can ask for the children of the first subtree of our subtree:
 
         >>> [c.value() for c in subtree.get_subtree((0,)).children()]
         ['y']
@@ -338,8 +565,8 @@ class DTree:
 
         discovered = self.tree_graph.new_vertex_property("bool")
         new_root = self.arg_to_vertex(path_or_new_root)
-
         dfs_search(self.tree_graph, new_root, VisitorExample(discovered))
+
         graph_view = GraphView(self.tree_graph, vfilt=discovered)
 
         return DTree(
@@ -407,6 +634,74 @@ class DTree:
             result = next(itertools.islice(result.out_neighbors(), idx, None))
 
         return result
+
+    def find_node(self, node_id: int) -> Maybe[Vertex]:
+        """
+        This method attempts to find the vertex corresponding to a derivation tree
+        node with the given numeric identifier.
+
+        Example
+        -------
+
+        We consider the string :code:`x := 1 ; y := x` in our assignment language:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> parse_tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
+        ...        (' ; ', []),
+        ...        ('<stmt>',
+        ...         [('<assgn>',
+        ...           [('<var>', [('y', [])]),
+        ...            (' := ', []),
+        ...            ('<rhs>', [('<var>', [('x', [])])])])])])])
+
+        >>> DTree._DTree__next_id = 0
+        >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
+
+        We obtain the identifier of the subtree at the path (0, 2, 0, 2), which
+        corresponds to the "x" :code:`<rhs>` tree.
+
+        >>> rhs_x_id = dtree.get_subtree((0, 2, 0, 2)).id()
+
+        From this id only, we can find the corresponding graph vertex.
+
+        >>> rhs_x_vertex = dtree.find_node(rhs_x_id).unwrap()
+        >>> print(dtree.get_subtree(rhs_x_vertex).to_str_repr())
+        22: <rhs>
+        └── 26: <var>
+            └── 28: "x"
+
+        :param node_id:
+        :return:
+        """
+
+        return Maybe.from_optional(
+            next(
+                iter(
+                    numpy.where(self.vertex_to_id.get_array() == numpy.intc(node_id))[0]
+                ),
+                None,
+            )
+        ).map(self.tree_graph.vertex)
 
     def open_leaves(self) -> "Tuple[DTree, ...]":
         """
@@ -945,14 +1240,81 @@ class DTree:
 
     def to_dot(self) -> str:
         """
-        TODO
+        This method returns a GraphViz DOT representation of this derivation tree.
 
-        :return:
+        Example
+        -------
+
+        We consider the string :code:`x := 1` in our assignment language:
+
+        >>> import string
+        >>> grammar = {
+        ...     "<start>":
+        ...         ["<stmt>"],
+        ...     "<stmt>":
+        ...         ["<assgn> ; <stmt>", "<assgn>"],
+        ...     "<assgn>":
+        ...         ["<var> := <rhs>"],
+        ...     "<rhs>":
+        ...         ["<var>", "<digit>"],
+        ...     "<var>": list(string.ascii_lowercase),
+        ...     "<digit>": list(string.digits)
+        ... }
+        >>> graph = NeoGrammarGraph(grammar)
+
+        >>> parse_tree: ParseTree = (
+        ...   '<start>',
+        ...     [('<stmt>',
+        ...       [('<assgn>',
+        ...         [('<var>', [('x', [])]),
+        ...          (' := ', []),
+        ...          ('<rhs>', [('<digit>', [('1', [])])])]),
+        ...        ])])
+
+        >>> DTree._DTree__next_id = 0
+        >>> dtree = DTree.from_parse_tree(parse_tree, graph).unwrap()
+
+        This is the tree's DOT representation:
+
+        >>> print(dtree.to_dot())
+        digraph G {
+        0 [label="0: <start> (0)"];
+        1 [label="1: <start>-choice (0)"];
+        2 [label="2: <stmt> (0)"];
+        3 [label="3: <stmt>-choice (1)"];
+        4 [label="4: <assgn> (1)"];
+        5 [label="5: <assgn>-choice (0)"];
+        6 [label="6: <var> (0)"];
+        7 [label="8: ' := ' (0)"];
+        8 [label="9: <rhs> (0)"];
+        9 [label="7: <var>-choice (23)"];
+        10 [label="11: 'x' (0)"];
+        11 [label="10: <rhs>-choice (1)"];
+        12 [label="12: <digit> (0)"];
+        13 [label="13: <digit>-choice (1)"];
+        14 [label="14: '1' (0)"];
+        0->1  [label=0];
+        1->2  [label=0];
+        2->3  [label=0];
+        3->4  [label=0];
+        4->5  [label=0];
+        5->6  [label=0];
+        5->7  [label=1];
+        5->8  [label=2];
+        6->9  [label=0];
+        8->11  [label=0];
+        9->10  [label=0];
+        11->12  [label=0];
+        12->13  [label=0];
+        13->14  [label=0];
+        }
+
+        :return: A GraphViz DOT representation of this derivation tree.
         """
 
         with tempfile.NamedTemporaryFile(suffix=".dot") as tmp:
             self.save_to_dot(tmp.name)
-            return pathlib.Path(tmp.name).read_text()
+            return pathlib.Path(tmp.name).read_text().strip()
 
     def arg_to_vertex(self, path_or_new_root: Vertex | numpy.int64 | Path) -> Vertex:
         """
@@ -1039,9 +1401,9 @@ class DTree:
         """
 
         result = (
-            self.value()
+            f"{self.id()}: {self.value()}"
             if isinstance(self.graph_node(), NonterminalNode)
-            else f'"{self.value()}"'
+            else f'{self.id()}: "{self.value()}"'
         )
 
         for child_idx, child in enumerate(self.children()):
